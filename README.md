@@ -4,3 +4,4 @@ Topic: Analysis of impact of doomscrolling and brainrot on people, their wellbei
 
 ## Team
 1. Danylo Beha - d.beha@ukma.edu.ua
+2. Krutkevych Ivan - i.krutkevych@ukma.edu.ua
