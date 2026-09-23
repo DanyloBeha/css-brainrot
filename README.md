@@ -26,11 +26,11 @@ H4: Crises intensify doomscrolling and negativity
 4. Qualitative: r/nosurf
 
 #### H2: 
-- [Reels/Shorts Consumption vs Attention Span](https://www.kaggle.com/datasets/jayjoshi37/reelsshorts-consumption-vs-attention-span)
+1. [Reels/Shorts Consumption vs Attention Span](https://www.kaggle.com/datasets/jayjoshi37/reelsshorts-consumption-vs-attention-span)
 
 #### H3:
-- [Social Media Addiction dataset](https://www.kaggle.com/datasets/engieid/social-media-addiction-dataset)
-- [The Dark At The End Of The Tunnel: Doomscrolling On Social Media Newsfeeds](https://osf.io/u9f6h/)
-- [Sleep & Doomscrolling Habits Dataset](https://www.kaggle.com/datasets/harpartapsingh13/sleep-and-doomscrolling-habits-dataset)
-- [Social Media and Mental Health](https://www.kaggle.com/datasets/souvikahmed071/social-media-and-mental-health)
-- [Student Social Media & Mental Health](https://www.kaggle.com/datasets/shivasingh4945/student-social-media-and-mental-health-impact)
+1. [Social Media Addiction dataset](https://www.kaggle.com/datasets/engieid/social-media-addiction-dataset)
+2. [The Dark At The End Of The Tunnel: Doomscrolling On Social Media Newsfeeds](https://osf.io/u9f6h/)
+3. [Sleep & Doomscrolling Habits Dataset](https://www.kaggle.com/datasets/harpartapsingh13/sleep-and-doomscrolling-habits-dataset)
+4. [Social Media and Mental Health](https://www.kaggle.com/datasets/souvikahmed071/social-media-and-mental-health)
+5. [Student Social Media & Mental Health](https://www.kaggle.com/datasets/shivasingh4945/student-social-media-and-mental-health-impact)
