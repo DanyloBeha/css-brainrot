@@ -1,12 +1,15 @@
-# css-brainrot
-Course: Computational Social Science (CSS) - NaUKMA, 2026
-Topic: Analysis of impact of doomscrolling and brainrot on people, their wellbeing and cognitive abilities over time
+# Brainrot
+Effects of doomscrolling and short-form media on discourse, attention, and wellbeing.  
+Course: Computational Social Science (CSS) - NaUKMA, 2026  
 
 ## Team
 1. Danylo Beha - d.beha@ukma.edu.ua
 2. Krutkevych Ivan - i.krutkevych@ukma.edu.ua
 
 ## Research overview
+### Topic
+Analysis of impact of doomscrolling and brainrot on people, their wellbeing and cognitive abilities over time
+
 ### Hypotheses and criteria
 H1: Discourse is getting shorter and simpler
 	- Lexical & NLP approach
