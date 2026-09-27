@@ -5,6 +5,7 @@ Course: Computational Social Science (CSS) - NaUKMA, 2026
 ## Team
 1. Danylo Beha - d.beha@ukma.edu.ua
 2. Krutkevych Ivan - i.krutkevych@ukma.edu.ua
+3. Daria Zasko - d.zasko@ukma.edu.ua
 
 ## Research overview
 ### Topic
