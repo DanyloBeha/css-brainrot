@@ -1,22 +1,3 @@
-"""
-Clean and structure raw CSV datasets for H2 Task 1.
-
-Reads every CSV in ./data/raw/, applies per-file cleaning (exact-dup removal,
-ID-based dedup, null handling, text/unicode normalization, date normalization),
-adds a source_dataset column, and writes the cleaned result to ./data/clean/
-under the same filename. Prints structure/null reports and a post-clean
-summary (row counts, columns, category frequency breakdowns) for each file
-and combined.
-
-Judgment calls baked in here (confirmed with the user, not silent):
-- Social_Media_Addiction.csv: rows with null `gender` are KEPT and labeled
-  "Unknown" rather than dropped (gender isn't essential to the addiction
-  metrics; dropping would lose otherwise-complete rows).
-- Social_Media_Addiction.csv: platform_usage value "Insta" is merged into
-  "Instagram" (same platform, inconsistent raw label) before the frequency
-  breakdown.
-"""
-
 import glob
 import hashlib
 import os
@@ -86,9 +67,6 @@ def clean_doomscrolling(df: pd.DataFrame, filename: str, label: str) -> pd.DataF
     df["RecordedDate"] = pd.to_datetime(df["RecordedDate"])
     df["StartDate"] = pd.to_datetime(df["StartDate"])
     df["EndDate"] = pd.to_datetime(df["EndDate"])
-    # Single-day data collection for both studies: year_month would be a
-    # constant single value, so a per-period breakdown doesn't add anything
-    # here and is skipped (see README/report notes).
     df["source_dataset"] = filename
     return df
 
