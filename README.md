@@ -21,8 +21,8 @@ H4: Crises intensify doomscrolling and negativity
 
 ### Datasets
 #### H1
-1. Short-form: r/memes, r/dankmemes, r/teenagers
-2. Long-form: r/changemyview, r/books, r/explainlikeimfive
+1. Short-form: r/memes, r/teenagers
+2. Long-form: r/books, r/explainlikeimfive
 3. Baseline: r/AskReddit
 4. Qualitative: r/nosurf
 
