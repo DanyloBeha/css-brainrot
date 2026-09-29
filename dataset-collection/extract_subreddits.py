@@ -43,6 +43,9 @@ Status report:
 """
 
 import argparse
+import csv
+import random
+import threading
 import calendar
 import json
 import os
@@ -518,6 +521,53 @@ def parse_ym(s):
     return int(y), int(m)
 
 
+PROBLEM_REPORT = "_problem_months.csv"
+FINAL_PROBLEMS = {"error", "stalled", "partial", "truncated"}
+
+
+def write_problem_report(out_dir, missing, kind):
+    """Rewrite <out>/_problem_months.csv: every month that is NOT complete and must
+    be recovered from another source (e.g. the Arctic Shift API)."""
+    done = read_manifest(out_dir)
+    rows = []
+    for name, rec in sorted(done.items()):
+        if rec.get("status") in FINAL_PROBLEMS:
+            rows.append((name, rec.get("kind", ""), name[3:10], rec["status"],
+                         rec.get("rows_total", sum(rec.get("rows", {}).values())),
+                         (rec.get("error") or "").replace("\n", " "),
+                         rec.get("finished_at", "")))
+    for name in missing:
+        if kind == "both" or name.startswith("RC_" if kind == "comments" else "RS_"):
+            rows.append((name, "comments" if name.startswith("RC_") else "submissions",
+                         name[3:10], "missing_on_drive", 0, "file is not on the source drive", ""))
+    path = os.path.join(out_dir, PROBLEM_REPORT)
+    with open(path + ".tmp", "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["file", "kind", "month", "status", "rows_saved", "reason", "finished_at"])
+        w.writerows(sorted(rows, key=lambda r: (r[1], r[2])))
+    os.replace(path + ".tmp", path)
+    return rows
+
+
+def timed(func, timeout):
+    """Run func() in a background thread; return (True, result) or (False, None) if it
+    did not finish in time. Used for anything that touches the source drive from the
+    main process, so a frozen drive can never freeze the scheduler itself."""
+    box = {}
+
+    def run():
+        try:
+            box["r"] = func()
+        except Exception as exc:                              # noqa: BLE001
+            box["e"] = exc
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        return False, t
+    return ("e" not in box), box.get("r")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -526,22 +576,27 @@ def main():
     ap.add_argument("--mirror", help="second output folder, e.g. the flash drive")
     ap.add_argument("--subreddits", default=",".join(DEFAULT_SUBREDDITS))
     ap.add_argument("--start", default="2012-01", help="first month, YYYY-MM")
-    ap.add_argument("--end", default="2025-12", help="last month, YYYY-MM")
+    ap.add_argument("--end", default="2025-06", help="last month, YYYY-MM (dumps end 2025-06)")
     ap.add_argument("--only", help="comma-separated months to process, e.g. 2016-03,2020-09")
-    ap.add_argument("--workers", type=int, default=2,
-                    help="months processed in parallel (2 suits a USB hard drive)")
+    ap.add_argument("--workers", type=int, default=2, help="months processed in parallel")
     ap.add_argument("--copy-local", action="store_true",
                     help="copy each month to --tmp first and delete the copy after")
     ap.add_argument("--tmp", default=tempfile.gettempdir(), help="temp folder for --copy-local")
     ap.add_argument("--limit-mb", type=int, default=0,
                     help="TEST ONLY: stop after this many decompressed MB per file")
     ap.add_argument("--redo", action="store_true",
-                    help="also re-process files marked truncated/error/partial/stalled")
+                    help="also re-try months already recorded as problems")
     ap.add_argument("--kind", choices=["both", "comments", "submissions"], default="both",
                     help="process only comments (RC) or only submissions (RS)")
     ap.add_argument("--skip", help="comma-separated dump files to leave out, e.g. RS_2017-01.zst")
-    ap.add_argument("--stall-minutes", type=float, default=15,
-                    help="stop a file that makes no progress for this long (default 15)")
+    ap.add_argument("--stall-minutes", type=float, default=5,
+                    help="watchdog window in minutes (default 5)")
+    ap.add_argument("--min-progress-gb", type=float, default=5,
+                    help="a file that decompresses less than this many GB in one watchdog "
+                         "window is stuck/crawling (healthy: 50-100+ GB; default 5)")
+    ap.add_argument("--max-min-per-gb", type=float, default=4,
+                    help="hard time limit per file: this many minutes per compressed GB, "
+                         "at least 30 min (healthy: ~0.5-1 min/GB; default 4)")
     ap.add_argument("--status", action="store_true", help="print progress summary and exit")
     args = ap.parse_args()
 
@@ -567,43 +622,54 @@ def main():
         print(f"Removed {cleaned} half-written .tmp files from an earlier interrupted run.")
 
     done = read_manifest(args.out)
-    problem = {"error", "stalled", "partial"}
-    # test runs ("partial_test") never count as finished
-    skip_status = {"ok"} if args.redo else {"ok", "truncated"} | problem
+    skip_status = {"ok"} if args.redo else {"ok"} | FINAL_PROBLEMS
     if args.limit_mb:
         skip_status = set()                  # test runs always re-run
     skip_files = set(x.strip() for x in args.skip.split(",")) if args.skip else set()
+    want = (lambda n: True) if args.kind == "both" else \
+        (lambda n: n.startswith("RC_" if args.kind == "comments" else "RS_"))
     todo = [f for f in files
             if done.get(os.path.basename(f), {}).get("status") not in skip_status
-            and os.path.basename(f) not in skip_files
-            and (args.kind == "both" or os.path.basename(f).startswith(
-                "RC_" if args.kind == "comments" else "RS_"))]
-    # Files that failed before are processed ALONE at the end, so a damaged spot
-    # on the drive cannot slow down the healthy files running next to it.
-    solo = [f for f in todo if done.get(os.path.basename(f), {}).get("status") in problem]
+            and os.path.basename(f) not in skip_files and want(os.path.basename(f))]
+    known_bad = [os.path.basename(f) for f in files if want(os.path.basename(f))
+                 and done.get(os.path.basename(f), {}).get("status") in FINAL_PROBLEMS]
+    # --redo: earlier problem months run ALONE at the end, never next to healthy ones
+    solo = [f for f in todo if done.get(os.path.basename(f), {}).get("status") in FINAL_PROBLEMS]
     main_q = [f for f in todo if f not in solo]
     sizes = {f: _size(f) for f in todo}
     todo_bytes = sum(sizes.values())
+    # a file that is known to read fine: used to test whether the drive responds again
+    good = [f for f in files if done.get(os.path.basename(f), {}).get("status") == "ok"]
+    probe_file = max(good, key=_size) if good else (todo[0] if todo else None)
+    probe_size = _size(probe_file) if probe_file else 0
+    missing_wanted = [m for m in missing if want(m)]
 
     print(f"Subreddits : {', '.join(subs)}")
     print(f"Months     : {args.start} .. {args.end}   ({args.kind})")
-    print(f"Files found: {len(files)}  |  to process: {len(todo)} ({fmt_bytes(todo_bytes)} compressed)"
-          + (f", {len(solo)} earlier failures retried alone at the end" if solo else ""))
-    if missing:
-        print(f"Missing    : {len(missing)} files not on disk: " + ", ".join(missing[:12]) +
-              (" ..." if len(missing) > 12 else ""))
+    print(f"Files found: {len(files)}  |  to process: {len(todo)} ({fmt_bytes(todo_bytes)} compressed)")
+    if known_bad and not args.redo:
+        print(f"Skipped    : {len(known_bad)} months already recorded as problems: "
+              + ", ".join(sorted(known_bad)))
+    if missing_wanted:
+        print(f"Missing    : {len(missing_wanted)} files not on disk: " + ", ".join(missing_wanted))
     if args.mirror:
         os.makedirs(args.mirror, exist_ok=True)
         print(f"Mirror     : {args.mirror}")
-    print(f"Watchdog   : a file with no progress for {args.stall_minutes:g} min is stopped "
-          f"and retried alone at the end")
+    print(f"Watchdog   : a month is abandoned if it reads < {args.min_progress_gb:g} GB in "
+          f"{args.stall_minutes:g} min, or takes > {args.max_min_per_gb:g} min per GB")
+    print(f"Problems   : listed in {os.path.join(args.out, PROBLEM_REPORT)}")
     print()
+    write_problem_report(args.out, missing_wanted, args.kind)
 
     ctx = multiprocessing.get_context("spawn")
     results = ctx.Queue()
-    running = {}        # file name -> dict(proc, src, progress, last, since, phase)
-    state = {"bytes_done": 0, "t_start": time.time()}
+    running = {}        # file name -> dict(proc, src, progress, last, since, phase, t0)
+    state = {"bytes_done": 0, "t_start": time.time(), "check_drive": False, "probe": None}
     stall_s = args.stall_minutes * 60
+    min_progress = args.min_progress_gb * 1e9
+
+    def say(msg):
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
     def job_for(src):
         return (src, args.out, subs, args.limit_mb, args.copy_local, args.tmp)
@@ -617,108 +683,147 @@ def main():
                                           "t0": time.time()}
 
     def finish(rec, phase):
-        """Record a result. In the main phase, failures are queued for a solo retry."""
-        info = running.pop(rec["file"], None)
-        src = info["src"] if info else None
-        if info:
-            info["proc"].join(timeout=10)
-        if rec.get("status") == "source_missing":
-            # Drive unplugged: nothing is recorded; the file goes back in the queue.
-            if src:
-                (main_q if phase == "main" else solo).insert(0, src)
-            state["source_lost"] = True
-            print(f"[{time.strftime('%H:%M:%S')}] {rec['file']:18s} source drive not reachable "
-                  f"- will be processed again", flush=True)
-            return
-        if args.limit_mb:
-            rec["status"] = "partial_test"
-        if phase == "main" and rec["status"] in problem and src:
-            solo.append(src)
-            rec["note"] = "will be retried alone at the end"
-        if args.mirror and rec.get("outputs"):
-            try:
-                mirror_files(rec["outputs"], args.out, args.mirror)
-            except Exception as exc:                  # noqa: BLE001
-                rec["mirror_error"] = f"{type(exc).__name__}: {exc}"
-        append_manifest(args.out, rec)
-        if src and not rec.get("note"):
-            state["bytes_done"] += sizes.get(src, 0)
-        elapsed = time.time() - state["t_start"]
-        bd = state["bytes_done"]
-        eta = elapsed / bd * (todo_bytes - bd) if bd else 0
-        rows = ", ".join(f"{k}={v:,}" for k, v in sorted(rec.get("rows", {}).items())) or "no rows"
-        flag = "" if rec["status"] in ("ok", "partial_test") else \
-            f"  <-- {rec['status'].upper()}: {rec.get('error')}"
-        if rec.get("note"):
-            flag += f"  [{rec['note']}]"
-        print(f"[{time.strftime('%H:%M:%S')}] {rec['file']:18s} {rec.get('seconds', 0):>7.0f}s  "
-              f"{rows}{flag}")
-        if rec.get("mirror_error"):
-            print(f"    mirror copy failed: {rec['mirror_error']}")
-        print(f"    progress {fmt_bytes(bd)} / {fmt_bytes(todo_bytes)}  ETA {eta / 3600:.1f} h",
-              flush=True)
+        """Record one result. Never raises: one bad month must not stop the run."""
+        try:
+            info = running.pop(rec["file"], None)
+            src = info["src"] if info else None
+            if info:
+                info["proc"].join(timeout=5)
+            if rec.get("status") == "source_missing":
+                # drive unplugged or not responding: nothing recorded, month goes back in line
+                if src:
+                    (main_q if phase == "main" else solo).insert(0, src)
+                state["check_drive"] = True
+                say(f"{rec['file']:18s} source drive not reachable - month will be retried")
+                return
+            if args.limit_mb:
+                rec["status"] = "partial_test"
+            # A stall while other months were running might have been caused by them
+            # (the whole drive freezes). Retry it once ALONE at the end to be sure.
+            if (phase == "main" and rec["status"] == "stalled" and args.workers > 1 and src):
+                solo.append(src)
+                rec["note"] = "will be retried once alone at the end"
+            if args.mirror and rec.get("outputs"):
+                try:
+                    mirror_files(rec["outputs"], args.out, args.mirror)
+                except Exception as exc:                  # noqa: BLE001
+                    rec["mirror_error"] = f"{type(exc).__name__}: {exc}"
+            append_manifest(args.out, rec)
+            write_problem_report(args.out, missing_wanted, args.kind)
+            if src and not rec.get("note"):
+                state["bytes_done"] += sizes.get(src, 0)
+            elapsed = time.time() - state["t_start"]
+            bd = state["bytes_done"]
+            eta = elapsed / bd * (todo_bytes - bd) if bd else 0
+            rows = ", ".join(f"{k}={v:,}" for k, v in sorted(rec.get("rows", {}).items())) or "no rows"
+            flag = "" if rec["status"] in ("ok", "partial_test") else \
+                f"  <-- {rec['status'].upper()}: {rec.get('error')}"
+            if rec.get("note"):
+                flag += f"  [{rec['note']}]"
+            say(f"{rec['file']:18s} {rec.get('seconds', 0):>7.0f}s  {rows}{flag}")
+            if rec.get("mirror_error"):
+                print(f"    mirror copy failed: {rec['mirror_error']}")
+            print(f"    progress {fmt_bytes(bd)} / {fmt_bytes(todo_bytes)}  ETA {eta / 3600:.1f} h",
+                  flush=True)
+        except Exception as exc:                          # noqa: BLE001
+            say(f"(could not record {rec.get('file')}: {type(exc).__name__}: {exc}) - continuing")
+
+    def abandon(name, info, reason):
+        """Stop a stuck month and move on."""
+        try:
+            info["proc"].terminate()
+        except Exception:                                 # noqa: BLE001
+            pass
+        info["proc"].join(timeout=20)
+        stem = name.replace(".zst", ".parquet.tmp")       # its half-written outputs
+        for root in (args.out, args.mirror):
+            if root and os.path.isdir(root):
+                for dp, _, fns in os.walk(root):
+                    if stem in fns:
+                        try:
+                            os.remove(os.path.join(dp, stem))
+                        except OSError:
+                            pass
+        state["check_drive"] = True
+        finish({"file": name, "kind": "comments" if name.startswith("RC_") else "submissions",
+                "status": "stalled", "rows": {}, "outputs": [], "rows_total": 0,
+                "seconds": round(time.time() - info["t0"], 1), "error": reason,
+                "finished_at": datetime.now().isoformat(timespec="seconds")}, info["phase"])
 
     def watchdog():
         now = time.time()
         for name, info in list(running.items()):
             val = info["progress"].value
-            if val != info["last"]:
-                info["last"], info["since"] = val, now
-            elif now - info["since"] > stall_s:
-                info["proc"].terminate()
-                info["proc"].join(timeout=30)
-                # remove this file's half-written outputs
-                stem = name.replace(".zst", ".parquet.tmp")
-                for root in (args.out, args.mirror):
-                    if root and os.path.isdir(root):
-                        for dp, _, fns in os.walk(root):
-                            if stem in fns:
-                                os.remove(os.path.join(dp, stem))
-                finish({"file": name, "kind": "comments" if name.startswith("RC_") else "submissions",
-                        "status": "stalled", "rows": {}, "outputs": [],
-                        "seconds": round(now - info["t0"], 1),
-                        "error": f"no progress for {args.stall_minutes:g} min after "
-                                 f"{val / 1e9:.1f} GB decompressed (the drive stopped responding)",
-                        "finished_at": datetime.now().isoformat(timespec="seconds")},
-                       info["phase"])
+            limit_s = max(30 * 60, sizes.get(info["src"], 0) / 1e9 * args.max_min_per_gb * 60)
+            if now - info["since"] > stall_s:
+                if val - info["last"] >= min_progress:
+                    info["last"], info["since"] = val, now          # healthy: new window
+                else:
+                    abandon(name, info, f"only {(val - info['last']) / 1e9:.1f} GB read in "
+                                        f"{args.stall_minutes:g} min (after {val / 1e9:.1f} GB) - "
+                                        f"drive stuck or crawling")
+                    continue
+            if now - info["t0"] > limit_s:
+                abandon(name, info, f"exceeded the time limit of {limit_s / 60:.0f} min "
+                                    f"(after {val / 1e9:.1f} GB)")
             elif not info["proc"].is_alive() and info["proc"].exitcode not in (0, None):
                 finish({"file": name, "status": "error", "rows": {}, "outputs": [],
                         "error": f"worker exited with code {info['proc'].exitcode}",
                         "seconds": round(now - info["t0"], 1)}, info["phase"])
 
-    def wait_for_source():
-        """Pause while the source drive is unplugged; continue when it is back."""
-        if os.path.isdir(args.src) and not state.get("source_lost"):
+    def drive_ok(timeout=60):
+        """Read 1 MB at a random spot of a known-good file, without blocking the scheduler."""
+        prev = state["probe"]
+        if prev is not None and prev.is_alive():
+            return False                                  # the last test read is still stuck
+        if not probe_file:
+            ok, _ = timed(lambda: os.path.isdir(args.src), timeout)
+            return bool(ok and _)
+
+        def read_block():
+            with open(probe_file, "rb", buffering=0) as fh:
+                fh.seek(random.randrange(0, max(1, probe_size - (1 << 20))))
+                return len(fh.read(1 << 20))
+        ok, res = timed(read_block, timeout)
+        if ok is False and isinstance(res, threading.Thread):
+            state["probe"] = res
+        return bool(ok and res)
+
+    def wait_for_drive():
+        """After a stall or unplug: start nothing new until the drive answers again."""
+        if not state["check_drive"] or running:
             return
-        if running:                         # let the other workers finish/fail first
-            return
-        if not os.path.isdir(args.src):
-            print(f"\n[{time.strftime('%H:%M:%S')}] Source folder {args.src} is not reachable. "
-                  f"Plug the drive back in (it must get the same drive letter); "
-                  f"processing continues automatically. Ctrl+C to stop.", flush=True)
-            while not os.path.isdir(args.src):
-                time.sleep(10)
-            time.sleep(15)                  # give Windows a moment to mount it fully
-            print(f"[{time.strftime('%H:%M:%S')}] Source is back - continuing.\n", flush=True)
-        state["source_lost"] = False
+        t0, told = time.time(), 0
+        while not drive_ok():
+            if time.time() - told > 300:
+                told = time.time()
+                say(f"source drive is not responding (waiting {(time.time() - t0) / 60:.0f} min). "
+                    f"If this lasts, unplug and re-plug it (same drive letter); "
+                    f"processing continues automatically.")
+            time.sleep(20)
+        if time.time() - t0 > 30:
+            say(f"source drive responds again after {(time.time() - t0) / 60:.1f} min - continuing")
+        state["check_drive"] = False
 
     def drain(phase, limit_workers):
         queue = main_q if phase == "main" else solo
         while queue or running:
-            wait_for_source()
-            while queue and len(running) < limit_workers and not state.get("source_lost"):
+            wait_for_drive()
+            while queue and len(running) < limit_workers and not state["check_drive"]:
                 start(queue.pop(0), phase)
             try:
                 rec = results.get(timeout=5)
                 finish(rec, running.get(rec["file"], {}).get("phase", phase))
             except queue_mod.Empty:
                 pass
+            except Exception as exc:                      # noqa: BLE001
+                say(f"(result queue problem: {type(exc).__name__}: {exc}) - continuing")
             watchdog()
 
     try:
         drain("main", max(1, args.workers))
         if solo:
-            print(f"\nRetrying {len(solo)} problem file(s) one at a time...\n", flush=True)
+            print(f"\nRetrying {len(solo)} month(s) one at a time...\n", flush=True)
             drain("solo", 1)
     except KeyboardInterrupt:
         # Stop immediately; half-written .tmp files are removed on the next start.
@@ -733,6 +838,13 @@ def main():
 
     print()
     print_status(args.out)
+    probs = write_problem_report(args.out, missing_wanted, args.kind)
+    if probs:
+        print(f"\n{len(probs)} month(s) need another source - see {os.path.join(args.out, PROBLEM_REPORT)}:")
+        for r in probs:
+            print(f"  {r[0]:16s} {r[3]:17s} {r[5][:90]}")
+    sys.stdout.flush()
+    os._exit(0)          # do not wait for test reads that may still hang on the drive
 
 
 if __name__ == "__main__":
