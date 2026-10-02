@@ -3,48 +3,54 @@ arctic_download.py
 Download Reddit comments and posts for selected subreddits from the Arctic Shift
 API (https://arctic-shift.photon-reddit.com) into Parquet.
 
-Three modes (can be combined in one run):
+Modes (can be combined in one run):
 
-  --comments        Deterministic random SAMPLE of comments per subreddit per month,
-                    in batches. Batch 1 = ~20,000 comments per subreddit-month.
-                    Later, --batch 2 adds ANOTHER ~20,000 that never overlap batch 1.
-  --posts           ALL posts (submissions) per subreddit per month.
+  --totals          Exact number of comments and posts per subreddit per month
+                    (saved in _monthly_totals.csv). Runs first if combined.
+  --comments        Deterministic random SAMPLE of comments per subreddit-month,
+                    in batches (--target, default 10,000 per batch).
+  --posts           Deterministic random SAMPLE of posts per subreddit-month,
+                    in batches (--post-target, default 2,000 per batch).
+  --all-posts       ALL posts per subreddit-month (slow for big subreddits).
   --full-months M   ALL comments of the given months (for thread-depth analysis),
                     e.g. --full-months 2012-06,2013-06,...
+  --batch N         For --comments / --posts: add batch N (another sample of the
+                    same size that never overlaps the earlier batches).
 
-How the comment sample works (reproducible and extendable):
+How the samples work (reproducible and extendable):
   * Each month is cut into equal time slots. The slot length is chosen per
-    subreddit-month so that one slot holds roughly 1,000 comments.
+    subreddit-month so that one slot holds roughly 1,000 comments or 200 posts.
   * The slots are put into a fixed pseudo-random order derived from a SHA-256
     hash of (seed, subreddit, month, slot number) - the same on every computer.
   * Batch 1 takes slots from the top of that order (every slot is downloaded
-    completely) until it has >= --target comments. Batch 2 continues where batch 1
+    completely) until it has >= the target. Batch 2 continues where batch 1
     stopped, and so on. Batches never overlap; all batches together = full month.
-  * Subreddit-months with fewer comments than --target are downloaded completely
+  * Subreddit-months with fewer records than the target are downloaded completely
     in batch 1.
-  * The slot length (chosen from the API's monthly comment counts) and the
-    positions used by each batch are saved in <out>/_sample_plan.json. Keep this
-    file with the data: with it, any batch can be reproduced or extended exactly
-    (copy it into a new --out folder before running there).
+  * The slot lengths and the positions used by each batch are saved in
+    _sample_plan.json (comments) and _sample_plan_posts.json (posts). Keep these
+    files with the data: with them, any batch can be reproduced or extended
+    exactly (copy them into a new --out folder before running there).
 
 Output (hive-partitioned Parquet, readable with pandas / DuckDB):
-  <out>/comments/subreddit=memes/year=2020/RC_2020-03_b1.parquet   (sample, batch 1)
-  <out>/comments_full/subreddit=memes/year=2020/RC_2020-03.parquet  (full months)
-  <out>/submissions/subreddit=memes/year=2020/RS_2020-03.parquet    (all posts)
-  <out>/_download_log.jsonl       one line per finished subreddit-month
-  <out>/_problems.csv             subreddit-months that failed after all retries
-  <out>/_sample_plan.json         sampling plan (keep it with the data / on GitHub)
+  <out>/comments/subreddit=memes/year=2020/RC_2020-03_b1.parquet      comment sample, batch 1
+  <out>/submissions/subreddit=memes/year=2020/RS_2020-03_b1.parquet   post sample, batch 1
+  <out>/submissions_full/subreddit=memes/year=2020/RS_2020-03.parquet (--all-posts)
+  <out>/comments_full/subreddit=memes/year=2020/RC_2020-03.parquet    (--full-months)
+  <out>/_monthly_totals.csv       exact monthly comment and post counts (--totals)
+  <out>/_download_log.jsonl       one line per finished task
+  <out>/_problems.csv             tasks that failed after all retries
+  <out>/_sample_plan*.json        sampling plans (keep them with the data / on GitHub)
 
 The script is resumable: stop it any time (Ctrl+C) and run the same command again.
-Nothing stops the run: failed subreddit-months are retried with back-off and, if
-they still fail, logged in _problems.csv and skipped (re-run later to retry them).
+Nothing stops the run: failed tasks are retried and, if they still fail, logged
+in _problems.csv and skipped (run the same command again later to retry them).
 
 Install:  pip install requests pyarrow
 Examples:
-  python arctic_download.py --out "C:\\reddit_arctic" --comments
+  python arctic_download.py --out "C:\\reddit_arctic" --totals
   python arctic_download.py --out "C:\\reddit_arctic" --posts
   python arctic_download.py --out "C:\\reddit_arctic" --comments --batch 2
-  python arctic_download.py --out "C:\\reddit_arctic" --full-months 2013-06,2016-06,2019-06,2022-06,2025-06
   python arctic_download.py --out "C:\\reddit_arctic" --status
 """
 
@@ -68,6 +74,7 @@ DEFAULT_SUBREDDITS = ["teenagers", "memes", "todayilearned",
                       "explainlikeimfive", "books", "nosurf"]
 SEED = "fightclub-v1"
 SLOT_TARGET = 1000                 # aim for ~this many comments per time slot
+POST_SLOT_TARGET = 200             # ... and posts per time slot (more, smaller slots)
 NICE_MINUTES = [1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720,
                 1440, 2880, 4320, 10080]
 MIN_PAGE = 100                     # limit=auto returns >= 100 rows unless the range is exhausted
@@ -91,6 +98,8 @@ POST_SCHEMA = pa.schema([
     ("selftext", pa.string()), ("url", pa.string()), ("domain", pa.string()),
     ("is_self", pa.bool_()), ("over_18", pa.bool_()), ("subreddit", pa.string()),
 ])
+POST_SAMPLE_SCHEMA = POST_SCHEMA.append(pa.field("batch", pa.int16())) \
+                                .append(pa.field("slot_start", pa.int64()))
 
 
 # ------------------------------------------------------------------ small helpers
@@ -157,10 +166,10 @@ def slot_order(seed, sub, ym, n_slots):
     return sorted(range(n_slots), key=key)
 
 
-def choose_slot_minutes(month_count, month_minutes):
+def choose_slot_minutes(month_count, month_minutes, slot_target=SLOT_TARGET):
     if month_count <= 0:
         return month_minutes
-    ideal = month_minutes * SLOT_TARGET / month_count
+    ideal = month_minutes * slot_target / month_count
     fitting = [m for m in NICE_MINUTES if m <= ideal]
     return fitting[-1] if fitting else NICE_MINUTES[0]
 
@@ -318,12 +327,12 @@ class Client:
                 stuck = 0
                 cursor = page_last - 1                         # re-read the last second (dedup above)
 
-    def time_series_counts(self, sub, start_ym, end_ym):
-        """{YYYY-MM: comment count} from the API's precomputed statistics (fast;
-        available from about 2018 on)."""
+    def time_series_counts(self, sub, start_ym, end_ym, kind="comments"):
+        """{YYYY-MM: count} of comments or posts from the API's precomputed monthly
+        statistics (fast; available from 2018 on; identical to exact counts)."""
         s, _ = month_bounds(start_ym)
         _, e = month_bounds(end_ym)
-        data = self.get("/api/time_series", {"key": f"r/{sub}/comments/count",
+        data = self.get("/api/time_series", {"key": f"r/{sub}/{kind}/count",
                                               "precision": "month", "after": s, "before": e},
                         attempts=3)
         out = {}
@@ -335,13 +344,41 @@ class Client:
             out[datetime.fromtimestamp(t + 2 * 86400, timezone.utc).strftime("%Y-%m")] = to_int(b.get("value")) or 0
         return out
 
-    def month_count(self, sub, ym):
+    def exact_count(self, kind, sub, a, b):
+        """Exact number of records with a <= created_utc < b from the aggregate
+        endpoint. Windows that time out (HTTP 422) are split into 4 smaller ones,
+        down to 1 hour; 1-hour windows are retried with waits."""
+        path = f"/api/{kind}/search/aggregate"
+        total, stack, small_fails, wait, freq = 0, [(a, b)], 0, self.retry_delay, "month"
+        while stack:
+            x, y = stack.pop()
+            try:
+                data = self.get(path, {"aggregate": "created_utc", "frequency": freq,
+                                       "subreddit": sub, "after": x, "before": y},
+                                attempts=4, raise_422=True)
+            except ServerTimeout:
+                if y - x > 3600:
+                    step = -(-(y - x) // 4)
+                    stack.extend((z, min(z + step, y)) for z in range(x, y, step))
+                    continue
+                small_fails += 1
+                if small_fails > 20:
+                    raise RuntimeError(f"aggregate keeps timing out (HTTP 422) at {x}")
+                freq = "day" if freq == "month" else "month"
+                self.sleep(wait)
+                wait = min(wait * 2, 120)
+                stack.append((x, y))
+                continue
+            total += sum(to_int(r.get("count")) or 0 for r in data)
+        return total
+
+    def month_count(self, sub, ym, kind="comments"):
         """Approximate number of comments in one subreddit-month (only used to choose
         the slot length). Tries the aggregate endpoint, then estimates the comment
         rate from three short pages."""
         start, end = month_bounds(ym)
         try:
-            data = self.get("/api/comments/search/aggregate",
+            data = self.get(f"/api/{kind}/search/aggregate",
                             {"aggregate": "created_utc", "frequency": "month",
                              "subreddit": sub, "after": start, "before": end}, attempts=2)
             return sum(to_int(b.get("count")) or 0 for b in data)
@@ -354,7 +391,7 @@ class Client:
         rates = []
         for k in range(3):
             p0 = start + (end - start) * k // 3
-            page = self.get("/api/comments/search",
+            page = self.get(f"/api/{kind}/search",
                             {"subreddit": sub, "after": p0, "before": end, "limit": 100,
                              "sort": "asc", "fields": "id,created_utc"})
             times = [t for t in (to_int(d.get("created_utc")) for d in page) if t is not None and t < end]
@@ -414,11 +451,14 @@ def part_path(out, folder, sub, ym, name):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="output folder, e.g. C:\\reddit_arctic")
+    ap.add_argument("--totals", action="store_true", help="exact monthly comment and post counts")
     ap.add_argument("--comments", action="store_true", help="download the comment sample")
-    ap.add_argument("--posts", action="store_true", help="download all posts")
+    ap.add_argument("--posts", action="store_true", help="download the post sample")
+    ap.add_argument("--all-posts", action="store_true", help="download ALL posts (slow)")
     ap.add_argument("--full-months", help="comma-separated months to download completely")
     ap.add_argument("--batch", type=int, default=1, help="sample batch number (default 1)")
-    ap.add_argument("--target", type=int, default=20000, help="comments per subreddit-month per batch")
+    ap.add_argument("--target", type=int, default=10000, help="comments per subreddit-month per batch")
+    ap.add_argument("--post-target", type=int, default=2000, help="posts per subreddit-month per batch")
     ap.add_argument("--subreddits", default=",".join(DEFAULT_SUBREDDITS))
     ap.add_argument("--start", default="2012-01")
     ap.add_argument("--end", default=last_full_month(), help="last month (default: last full month)")
@@ -467,8 +507,8 @@ def main():
             print(f"{mode:14s} rows: {n:,}")
         return
 
-    if not (args.comments or args.posts or args.full_months):
-        ap.error("choose at least one of --comments, --posts, --full-months")
+    if not (args.totals or args.comments or args.posts or args.all_posts or args.full_months):
+        ap.error("choose at least one of --totals, --comments, --posts, --all-posts, --full-months")
 
     subs = [s.strip() for s in args.subreddits.split(",") if s.strip()]
     months = month_list(args.start, args.end)
@@ -486,19 +526,50 @@ def main():
     if removed:
         say(f"removed {removed} half-written files from an interrupted run")
 
-    plan = {"seed": SEED, "slot_target": SLOT_TARGET, "target": args.target, "subreddit_months": {}}
-    if os.path.exists(plan_path):
-        with open(plan_path, encoding="utf-8") as f:
-            plan = json.load(f)
-        if plan.get("target") != args.target or plan.get("seed") != SEED:
-            say(f"note: using the saved plan (seed {plan['seed']}, target {plan['target']}) "
-                f"for consistency; --target is ignored")
-    target = plan["target"]
+    # sampling plans: one per kind; a saved plan always wins (keeps batches consistent)
+    plan_paths = {"comments": plan_path, "posts": os.path.join(out, "_sample_plan_posts.json")}
+    plan_defaults = {"comments": {"seed": SEED, "slot_target": SLOT_TARGET, "target": args.target},
+                     "posts": {"seed": SEED + "-posts", "slot_target": POST_SLOT_TARGET,
+                               "target": args.post_target}}
+    plans = {}
+    for kind, path in plan_paths.items():
+        plans[kind] = dict(plan_defaults[kind], subreddit_months={})
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                plans[kind] = json.load(f)
+            plans[kind].setdefault("slot_target", plan_defaults[kind]["slot_target"])
+            wanted = plan_defaults[kind]["target"]
+            if (kind == "comments" and args.comments) or (kind == "posts" and args.posts):
+                if plans[kind]["target"] != wanted:
+                    say(f"note: {kind} sample uses the saved plan's target of "
+                        f"{plans[kind]['target']:,} per batch (not {wanted:,}) for consistency")
 
-    def save_plan():
-        with open(plan_path + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(plan, f, indent=1, sort_keys=True)
-        os.replace(plan_path + ".tmp", plan_path)
+    def save_plan(kind):
+        path = plan_paths[kind]
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(plans[kind], f, indent=1, sort_keys=True)
+        os.replace(path + ".tmp", path)
+
+    # ---- monthly totals file
+    totals_path = os.path.join(out, "_monthly_totals.csv")
+    totals = {}                     # (sub, ym) -> {"comments": (n, source), "posts": (n, source)}
+    if os.path.exists(totals_path):
+        with open(totals_path, encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                d = totals.setdefault((r["subreddit"], r["month"]), {})
+                for kind in ("comments", "posts"):
+                    if r.get(f"{kind}_total", "") != "":
+                        d[kind] = (int(r[f"{kind}_total"]), r.get(f"{kind}_source", ""))
+
+    def save_totals():
+        with open(totals_path + ".tmp", "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["subreddit", "month", "comments_total", "comments_source",
+                        "posts_total", "posts_source"])
+            for (sub, ym), d in sorted(totals.items()):
+                c, p = d.get("comments", ("", "")), d.get("posts", ("", ""))
+                w.writerow([sub, ym, c[0], c[1], p[0], p[1]])
+        os.replace(totals_path + ".tmp", totals_path)
 
     def record(rec):
         with file_lock:
@@ -514,36 +585,60 @@ def main():
                     w.writerow([r["task"], r["mode"], r["subreddit"], r["month"], r["status"],
                                 r.get("error", ""), r["finished_at"]])
             os.replace(prob_path + ".tmp", prob_path)
-            if rec["mode"] == "comments" and rec["status"] == "ok":
-                save_plan()
+            if rec["mode"] in ("comments", "posts") and rec["status"] == "ok":
+                save_plan(rec["mode"])
+            if rec["mode"].startswith("totals"):
+                save_totals()
 
-    # ---- comment counts per month (only needed to choose slot lengths)
+    # ---- counts per month (only needed to choose slot lengths)
     ts_counts, ts_lock = {}, threading.Lock()
 
-    def count_for(sub, ym):
+    def ts_for(kind, sub):
         with ts_lock:
-            if sub not in ts_counts:
+            if (kind, sub) not in ts_counts:
                 try:
-                    ts_counts[sub] = client.time_series_counts(sub, args.start, args.end)
+                    ts_counts[(kind, sub)] = client.time_series_counts(sub, args.start, args.end, kind)
                 except Stop:
                     raise
                 except Exception:                                  # noqa: BLE001
-                    ts_counts[sub] = {}
-        if ym in ts_counts[sub]:
-            return ts_counts[sub][ym]
-        return client.month_count(sub, ym)
+                    ts_counts[(kind, sub)] = {}
+            return ts_counts[(kind, sub)]
+
+    def count_for(kind, sub, ym):
+        if kind in totals.get((sub, ym), {}):                     # exact count from --totals
+            return totals[(sub, ym)][kind][0]
+        ts = ts_for(kind, sub)
+        if ym in ts:
+            return ts[ym]
+        # exact count, so the slot length (and the sample) is the same on every run
+        a, b = month_bounds(ym)
+        try:
+            return client.exact_count(kind, sub, a, b)
+        except Stop:
+            raise
+        except Exception:                                          # noqa: BLE001
+            return client.month_count(sub, ym, kind)               # last resort: estimate
 
     # ---- task functions -------------------------------------------------------
-    def sample_task(sub, ym):
+    SAMPLE_KINDS = {
+        "comments": ("comments", "RC", COMMENT_FIELDS, COMMENT_SCHEMA, SAMPLE_SCHEMA),
+        "posts": ("submissions", "RS", POST_FIELDS, POST_SCHEMA, POST_SAMPLE_SCHEMA),
+    }
+
+    def sample_task(kind, sub, ym):
+        folder, prefix, fields, schema, sample_schema = SAMPLE_KINDS[kind]
+        plan = plans[kind]
+        target = plan["target"]
         key = f"{sub}|{ym}"
         start, end = month_bounds(ym)
         month_minutes = (end - start) // 60
         entry = plan["subreddit_months"].get(key)
         if entry is None:
-            c = count_for(sub, ym)
+            c = count_for(kind, sub, ym)
             complete = c <= target
             entry = {"count_estimate": c,
-                     "slot_minutes": month_minutes if complete else choose_slot_minutes(c, month_minutes),
+                     "slot_minutes": month_minutes if complete else
+                     choose_slot_minutes(c, month_minutes, plan["slot_target"]),
                      "batches": {}}
             with file_lock:
                 plan["subreddit_months"][key] = entry
@@ -558,15 +653,15 @@ def main():
         # this batch starts where the previous batch ended (re-running a batch reuses its slots)
         prev_end = max([v["end_pos"] for v in earlier.values()], default=0)
         order = slot_order(plan["seed"], sub, ym, n_slots)
-        path = part_path(out, "comments", sub, ym, f"RC_{ym}_b{args.batch}.parquet")
-        w = Writer(path, SAMPLE_SCHEMA)
+        path = part_path(out, folder, sub, ym, f"{prefix}_{ym}_b{args.batch}.parquet")
+        w = Writer(path, sample_schema)
         pos = prev_end
         try:
             while pos < n_slots and w.n < target:
                 s0 = start + order[pos] * slot_s
                 s1 = min(s0 + slot_s, end)
-                for d in client.fetch_range("comments", sub, s0, s1, COMMENT_FIELDS):
-                    w.add(row_from(d, COMMENT_FIELDS, COMMENT_SCHEMA) + [args.batch, s0])
+                for d in client.fetch_range(kind, sub, s0, s1, fields):
+                    w.add(row_from(d, fields, schema) + [args.batch, s0])
                 pos += 1
             w.close()
         except BaseException:
@@ -576,6 +671,34 @@ def main():
             entry["batches"][str(args.batch)] = {"start_pos": prev_end, "end_pos": pos, "rows": w.n}
         return {"rows": w.n, "slots": pos - prev_end, "slot_minutes": entry["slot_minutes"],
                 "complete_month": pos >= n_slots}
+
+    def totals_task(kind, sub):
+        """Exact monthly counts: API statistics where available (2018+), else exact
+        aggregate counts. Months that fail are retried on the next run."""
+        ts = ts_for(kind, sub)
+        filled, failed = 0, []
+        for ym in months:
+            if kind in totals.get((sub, ym), {}):
+                continue
+            try:
+                if ym in ts:
+                    val, src = ts[ym], "statistics"
+                else:
+                    a, b = month_bounds(ym)
+                    val, src = client.exact_count(kind, sub, a, b), "exact_count"
+            except Stop:
+                raise
+            except Exception as exc:                               # noqa: BLE001
+                failed.append(f"{ym} ({type(exc).__name__})")
+                continue
+            with file_lock:
+                totals.setdefault((sub, ym), {})[kind] = (val, src)
+                filled += 1
+                if filled % 12 == 0:
+                    save_totals()
+        if failed:
+            raise RuntimeError(f"{len(failed)} months could not be counted: " + ", ".join(failed[:10]))
+        return {"rows": filled}
 
     def full_task(kind, folder, prefix, fields, schema, sub, ym):
         start, end = month_bounds(ym)
@@ -589,28 +712,48 @@ def main():
             raise
         return {"rows": w.n}
 
-    tasks = []
+    totals_tasks, tasks = [], []
+    if args.totals:
+        span = f"{args.start}..{args.end}"
+        for kind in ("posts", "comments"):
+            for s in subs:
+                task = f"totals_{kind}|{s}|{span}"
+                # done only if every month of this subreddit has a count of this kind
+                if done.get(task, {}).get("status") == "ok" and all(
+                        kind in totals.get((s, ym), {}) for ym in months):
+                    continue
+                done.pop(task, None)
+                totals_tasks.append((f"totals_{kind}", task, s, span))
     if args.comments:
         tasks += [("comments", f"comments_b{args.batch}|{s}|{ym}", s, ym) for ym in months for s in subs]
+    if args.posts:
+        tasks += [("posts", f"posts_b{args.batch}|{s}|{ym}", s, ym) for ym in months for s in subs]
+    if args.all_posts:
+        tasks += [("posts_full", f"posts_full|{s}|{ym}", s, ym) for ym in months for s in subs]
     if args.full_months:
         for ym in [m.strip() for m in args.full_months.split(",") if m.strip()]:
             tasks += [("comments_full", f"comments_full|{s}|{ym}", s, ym) for s in subs]
-    if args.posts:
-        tasks += [("posts", f"posts|{s}|{ym}", s, ym) for ym in months for s in subs]
     todo = [t for t in tasks if done.get(t[1], {}).get("status") != "ok"]
-    say(f"{len(tasks)} subreddit-months in total, {len(tasks) - len(todo)} already done, "
-        f"{len(todo)} to download  (workers={args.workers}, max {(1 / args.min_interval) if args.min_interval else float('inf'):.1f} requests/s)")
+    rate = f"{(1 / args.min_interval) if args.min_interval else float('inf'):.1f}"
+    if args.totals:
+        say(f"totals: {len(totals_tasks)} subreddit/kind combinations to count "
+            f"({len(subs) * 2 - len(totals_tasks)} already complete)")
+    if tasks:
+        say(f"{len(tasks)} subreddit-months in total, {len(tasks) - len(todo)} already done, "
+            f"{len(todo)} to download  (workers={args.workers}, max {rate} requests/s)")
 
     def run(t):
         mode, task, sub, ym = t
         t0, r0 = time.time(), client.requests
         try:
-            if mode == "comments":
-                info = sample_task(sub, ym)
+            if mode in ("comments", "posts"):
+                info = sample_task(mode, sub, ym)
+            elif mode.startswith("totals_"):
+                info = totals_task(mode[len("totals_"):], sub)
             elif mode == "comments_full":
                 info = full_task("comments", "comments_full", "RC", COMMENT_FIELDS, COMMENT_SCHEMA, sub, ym)
             else:
-                info = full_task("posts", "submissions", "RS", POST_FIELDS, POST_SCHEMA, sub, ym)
+                info = full_task("posts", "submissions_full", "RS", POST_FIELDS, POST_SCHEMA, sub, ym)
             rec = {"task": task, "mode": mode, "subreddit": sub, "month": ym, "status": "ok", **info}
         except Stop:
             return None
@@ -623,34 +766,44 @@ def main():
         return rec
 
     t_start, finished, rows_total = time.time(), 0, 0
-    pool = ThreadPoolExecutor(max_workers=max(1, args.workers))
-    futures = [pool.submit(run, t) for t in todo]
-    try:
-        for fut in as_completed(futures):
-            rec = fut.result()
-            if rec is None:
-                continue
-            finished += 1
-            rows_total += rec.get("rows", 0)
-            el = time.time() - t_start
-            eta = el / finished * (len(todo) - finished)
-            if rec["status"] == "ok":
-                extra = f"  ({rec['note']})" if rec.get("note") else ""
-                say(f"{rec['mode']:13s} r/{rec['subreddit']:18s} {rec['month']}  {rec['rows']:>9,} rows  "
-                    f"{rec['requests']:>5} req  {rec['seconds']:>6.0f}s{extra}   "
-                    f"[{finished}/{len(todo)}, ETA {eta / 3600:.1f} h]")
-            else:
-                say(f"{rec['mode']:13s} r/{rec['subreddit']:18s} {rec['month']}  FAILED: {rec['error']}  "
-                    f"(logged in _problems.csv)   [{finished}/{len(todo)}]")
-    except KeyboardInterrupt:
-        say("stopping... finished subreddit-months are saved; run the same command to resume")
-        client.stop.set()
-        pool.shutdown(wait=False, cancel_futures=True)
-        os._exit(1)
-    pool.shutdown(wait=True)
+
+    def run_phase(items):
+        nonlocal finished, rows_total
+        if not items:
+            return
+        n0, t0 = finished, time.time()
+        pool = ThreadPoolExecutor(max_workers=max(1, args.workers))
+        futures = [pool.submit(run, t) for t in items]
+        try:
+            for fut in as_completed(futures):
+                rec = fut.result()
+                if rec is None:
+                    continue
+                finished += 1
+                rows_total += rec.get("rows", 0)
+                k = finished - n0
+                eta = (time.time() - t0) / k * (len(items) - k)
+                what = "months counted" if rec["mode"].startswith("totals") else "rows"
+                if rec["status"] == "ok":
+                    extra = f"  ({rec['note']})" if rec.get("note") else ""
+                    say(f"{rec['mode']:15s} r/{rec['subreddit']:18s} {rec['month']}  {rec['rows']:>9,} {what}  "
+                        f"{rec['requests']:>5} req  {rec['seconds']:>6.0f}s{extra}   "
+                        f"[{k}/{len(items)}, ETA {eta / 3600:.1f} h]")
+                else:
+                    say(f"{rec['mode']:15s} r/{rec['subreddit']:18s} {rec['month']}  FAILED: {rec['error']}  "
+                        f"(logged in _problems.csv)   [{k}/{len(items)}]")
+        except KeyboardInterrupt:
+            say("stopping... finished work is saved; run the same command to resume")
+            client.stop.set()
+            pool.shutdown(wait=False, cancel_futures=True)
+            os._exit(1)
+        pool.shutdown(wait=True)
+
+    run_phase(totals_tasks)          # exact counts first: they also size the post sample's slots
+    run_phase(todo)
 
     failed = sum(1 for r in done.values() if r["status"] != "ok")
-    say(f"done: {finished} subreddit-months, {rows_total:,} rows, {client.requests:,} requests, "
+    say(f"done: {finished} tasks, {rows_total:,} rows/months, {client.requests:,} requests, "
         f"{(time.time() - t_start) / 3600:.1f} h" + (f"; {failed} problems listed in {prob_path} "
                                                     f"(run the same command again to retry them)" if failed else ""))
 
