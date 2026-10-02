@@ -169,6 +169,10 @@ class Stop(Exception):
     pass
 
 
+class ServerTimeout(Exception):
+    """HTTP 422 from Arctic Shift: the server gave up on a (too heavy) query."""
+
+
 # ------------------------------------------------------------------ HTTP client
 class Client:
     """Polite API client: shared rate limit, retries with back-off, 429 handling."""
@@ -199,7 +203,11 @@ class Client:
         if wait > 0:
             time.sleep(wait)
 
-    def get(self, path, params, attempts=8):
+    def sleep(self, seconds):
+        if self.stop.wait(seconds):
+            raise Stop()
+
+    def get(self, path, params, attempts=8, raise_422=False):
         if path in self.no_fields:
             params = {k: v for k, v in params.items() if k != "fields"}
         delay = self.retry_delay
@@ -216,6 +224,8 @@ class Client:
                     with self.lock:
                         self.next_time = max(self.next_time, time.time() + reset + 1)
                     continue
+                if r.status_code == 422 and raise_422:
+                    raise ServerTimeout()
                 if r.status_code == 400 and "fields" in params:
                     self.no_fields.add(path)
                     self.log(f"server rejected 'fields' on {path}; requesting full records")
@@ -231,19 +241,45 @@ class Client:
                     raise
                 self.log(f"request failed ({type(exc).__name__}: {str(exc)[:120]}) - "
                          f"retry {attempt}/{attempts - 1} in {delay}s")
-                time.sleep(delay)
+                self.sleep(delay)
                 delay = min(delay * 2, 300)
         raise RuntimeError("unreachable")
 
     def fetch_range(self, kind, sub, start, end, fields):
         """Yield every record with start <= created_utc < end, oldest first.
-        Robust to either inclusive or exclusive after/before semantics."""
+        Robust to either inclusive or exclusive after/before semantics.
+
+        Arctic Shift answers HTTP 422 when a query takes it too long. Then the same
+        request tends to fail again, while a lighter one succeeds. So on a 422 the
+        query window is made smaller (down to 1 minute) and the page size switches
+        between "auto" and 100; after successes the window grows back. Only if even
+        the smallest queries keep failing for ~25 minutes does the month fail."""
         path = f"/api/{kind}/search"
+        full_span = end - start + 1
         cursor, last_ts, boundary_ids, stuck = start - 1, None, set(), 0
+        span, limit, timeouts, wait = full_span, "auto", 0, self.retry_delay
         while True:
-            page = self.get(path, {"subreddit": sub, "after": cursor, "before": end + 1,
-                                   "limit": "auto", "sort": "asc",
-                                   "fields": ",".join(fields)})
+            hi = min(end, cursor + span)                       # query window (cursor, hi]
+            try:
+                page = self.get(path, {"subreddit": sub, "after": cursor, "before": hi + 1,
+                                       "limit": limit, "sort": "asc",
+                                       "fields": ",".join(fields)}, raise_422=True)
+            except ServerTimeout:
+                timeouts += 1
+                limit = "100" if limit == "auto" else "auto"
+                if span > 60:
+                    span = max(60, span // 4)                  # lighter query, try again at once
+                    continue
+                if timeouts >= 30:
+                    raise RuntimeError(f"server keeps timing out (HTTP 422) at {cursor} even for "
+                                       f"1-minute queries")
+                if timeouts in (6, 15, 25):
+                    self.log(f"r/{sub}: server timeouts (HTTP 422) - still retrying with small "
+                             f"queries, waiting {wait:.0f}s")
+                self.sleep(wait)
+                wait = min(wait * 2, 120)
+                continue
+            timeouts, wait = 0, self.retry_delay
             new = 0
             for d in page:
                 ts = to_int(d.get("created_utc"))
@@ -256,8 +292,13 @@ class Client:
                 boundary_ids.add(d.get("id"))
                 new += 1
                 yield d
-            if len(page) < MIN_PAGE:
-                return                                         # range exhausted
+            if len(page) < MIN_PAGE:                           # this window is exhausted
+                if hi >= end:
+                    return
+                cursor = hi
+                span = min(full_span, span * 2)                # things work: grow the window again
+                stuck = 0
+                continue
             page_last = max(to_int(d.get("created_utc")) or 0 for d in page)
             if page_last >= end:
                 return
@@ -266,6 +307,7 @@ class Client:
                 # size, so ask again a few times for a bigger page before stepping over it
                 stuck += 1
                 if stuck <= 5:
+                    limit = "auto"
                     continue
                 self.log(f"r/{sub}: more records in one second than one page holds at "
                          f"{page_last}; some may be skipped")
@@ -307,11 +349,13 @@ class Client:
             raise
         except Exception:                                          # noqa: BLE001
             pass
+        # fixed page size (not "auto", whose size varies with server load) so the estimate,
+        # and therefore the slot length, is the same every time it is computed
         rates = []
         for k in range(3):
             p0 = start + (end - start) * k // 3
             page = self.get("/api/comments/search",
-                            {"subreddit": sub, "after": p0, "before": end, "limit": "auto",
+                            {"subreddit": sub, "after": p0, "before": end, "limit": 100,
                              "sort": "asc", "fields": "id,created_utc"})
             times = [t for t in (to_int(d.get("created_utc")) for d in page) if t is not None and t < end]
             if len(times) >= MIN_PAGE:
