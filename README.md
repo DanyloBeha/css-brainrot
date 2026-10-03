@@ -7,6 +7,20 @@ Course: Computational Social Science (CSS) - NaUKMA, 2026
 2. Krutkevych Ivan - i.krutkevych@ukma.edu.ua
 3. Daria Zasko - d.zasko@ukma.edu.ua
 
+## Structure
+```
+css-brainrot/
+├── dataset-collection/					# HW 1
+│	├── arctic_download.py				# used for downloading reddit dataset
+│   └── ...
+│
+├── exploratory-data-analysis/			# HW 2
+│
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
 ## Research overview
 ### Topic
 Analysis of impact of doomscrolling and brainrot on people, their wellbeing and cognitive abilities over time
