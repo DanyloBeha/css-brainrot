@@ -10,11 +10,18 @@ Course: Computational Social Science (CSS) - NaUKMA, 2026
 ## Structure
 ```
 css-brainrot/
-├── dataset-collection/					# HW 1
-│	├── arctic_download.py				# used for downloading reddit dataset
+├── dataset-collection/                  # HW 2
+│   ├── arctic_download.py               # used for downloading the reddit dataset
 │   └── ...
 │
-├── exploratory-data-analysis/			# HW 2
+├── exploratory-data-analysis/           # HW 3
+│   ├── eda.ipynb                        # team notebook (Ivan's H4 section is filled by tools/insert_h4.py)
+│   ├── notebooks/                       # section notebooks (overview, text, crises)
+│   ├── src/                             # all logic: cleaning, aggregates, text metrics, events, charts
+│   ├── tools/                           # scripts that generate and merge the notebooks
+│   ├── data/                            # raw and processed data stay local; aggregates/ is tracked
+│   ├── figures/  outputs/  docs/        # charts, deliverables, research log and chart backlog
+│   └── run_pipeline.py                  # rebuilds every table (docs/pipeline.md); every script and chart is explained in docs/code_guide.md and docs/figure_index.md
 │
 ├── .gitignore
 ├── LICENSE
