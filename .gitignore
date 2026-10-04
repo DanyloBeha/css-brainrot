@@ -1,1 +1,17 @@
 *.csv
+!exploratory-data-analysis/outputs/3_FightClub.csv
+
+# environment / OS / editor
+.venv/
+.DS_Store
+__pycache__/
+.ipynb_checkpoints/
+
+# HW3 data: raw + row-level derived data stay local, only aggregates are tracked
+exploratory-data-analysis/data/reddit_arctic/
+exploratory-data-analysis/data/processed/
+exploratory-data-analysis/data/external/raw/
+
+# assistant files
+CLAUDE.md
+.claude/
