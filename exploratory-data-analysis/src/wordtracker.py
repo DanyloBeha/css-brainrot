@@ -1,19 +1,7 @@
-"""Universal word tracker: give it any words or phrases, get their rate per 10,000 words in every cleaned Reddit comment.
-
-    from src.wordtracker import track
-    track(["doomscroll*", "six seven"], by="year")                       # one column per term
-    track({"slang": ["rizz", "gyatt"], "doom": ["doomscroll*"]})         # a dict combines the terms of a group
-    python -m src.wordtracker "doomscroll*" "six seven" --by year        # same from the terminal
-
-How a term is matched (lower-cased text, URLs removed, curly apostrophes straightened, whole words only):
-    "rizz"          the word rizz, not "rizzoli"
-    "brain rot"     brain rot, brain-rot or brain  rot (a space matches spaces and hyphens)
-    "doomscroll*"   a trailing * allows any ending: doomscroll, doomscrolling, doomscrolled
-    regex=True      terms are used as written (RE2 syntax) and every row is scanned (slower)
-No synonyms or related words are matched: the tracker counts exactly the strings you give it.
-Denominator: the same word count per row as everywhere else (src/lexicons.py tokenizer), summed per month from overview_counts.
-Rate = hits * 10,000 / words; reach = share of comments (rows) with at least one hit. Months with fewer than `min_tokens` words are dropped.
-"""
+# "rizz" whole word only, "brain rot" also matches brain-rot
+# trailing * = any ending, regex=True = raw RE2 (slow)
+# exact strings only, no synonyms
+# track(["doomscroll*"], by="year") or python -m src.wordtracker ...
 import argparse
 import re
 
@@ -25,7 +13,6 @@ from .lexicons import clean_sql
 
 
 def pattern(term, regex=False):
-    """Regex (RE2) for one term as described in the module docstring."""
     if regex:
         return term
     t = term.strip().lower()
@@ -39,9 +26,7 @@ def _q(s):
 
 
 def track(terms, by="month", types=("comment",), subreddits=None, regex=False, pool=False, min_tokens=50_000):
-    """Rate per 10,000 words and reach for each term (or group). Returns a long DataFrame:
-    name, type, subreddit, period, hits, rows_with_hit, words, rows, per_10k_words, reach.
-    by = "month" or "year"; pool=True adds the subreddits together (hits and words are summed, so large samples weigh more)."""
+    # pool=True sums hits and words, big samples weigh more
     groups = terms if isinstance(terms, dict) else {t: [t] for t in terms}
     names = list(groups)
     pats = {n: r"\b(" + "|".join(pattern(t, regex) for t in groups[n]) + r")\b" for n in names}

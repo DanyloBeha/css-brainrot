@@ -1,27 +1,22 @@
-"""Lexicons and the one tokenizer used for numerator and denominator.
-
-All strings are written for DuckDB SQL (single quotes already escaped, RE2 syntax).
-"""
+# duckdb sql strings, RE2, quotes pre-escaped
 CORE = ["brain[ -]?rot\\w*", "skibidi"]
 EXTENDED = ["rizz(?:ler|ed|ing|es|y)?", "gyatt", "fanum tax", "mewing", "tralalero", "tung tung"]
-AMBIGUOUS = ["sigma"]                       # report as a separate tier
+AMBIGUOUS = ["sigma"]  # own tier
 DOOM = [r"doom ?scroll\w*", r"doom ?surf\w*"]
 
-# URLs are removed before counting words or matching terms.
 URL_RE = r"https?://\S+|www\.\S+"
-TOKEN_RE_SQL = "[a-z0-9'']+"                 # '' = escaped quote inside a SQL string
-CURLY = "’‘ʼ`"                # typographic apostrophes (mobile keyboards): "they’re" must stay one word
+TOKEN_RE_SQL = "[a-z0-9'']+"  # '' = escaped quote
+CURLY = "’‘ʼ`"  # curly quotes, "they’re" stays one word
 
 
-def build_re(terms):                        # no single quotes: safe inside SQL strings
+def build_re(terms):  # no single quotes, sql-safe
     return r"\b(" + "|".join(terms) + r")\b"
 
 
-PREFILTER = "brain|skibidi|rizz|gyatt|fanum|mewing|tralalero|tung tung|sigma|doom"   # cheap substring test before the regexes
+PREFILTER = "brain|skibidi|rizz|gyatt|fanum|mewing|tralalero|tung tung|sigma|doom"  # cheap prefilter before regex
 
 
 def clean_sql(col="text"):
-    """SQL expression: lower-cased text, typographic apostrophes straightened, URLs removed."""
     return f"regexp_replace(regexp_replace(lower({col}), '[{CURLY}]', '''', 'g'), '{URL_RE}', ' ', 'g')"
 
 
@@ -36,8 +31,8 @@ SIGMA_RE = build_re(AMBIGUOUS)
 DOOM_RE = build_re(DOOM)
 
 
-# Crisis vocabulary for H4. Event-specific lists test whether an event was talked about at all (manipulation check);
-# CRISIS_GENERAL is the broad "crisis talk" list used for the timeline.
+# event lists = did event reach the sub (manipulation check)
+# CRISIS_GENERAL = broad timeline list
 EVENT_TERMS = {
     "covid": [r"covid\w*", "coronavirus", "corona virus", "pandemic", r"lockdown\w*", r"quarantin\w*", "social distancing"],
     "ukraine": [r"ukrain\w*", r"russia\w*", "putin", "invasion", r"zelensk\w*", "kyiv", "kiev"],

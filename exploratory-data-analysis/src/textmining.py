@@ -1,4 +1,4 @@
-"""Lexicon matches and monthly rates (Phase 3). Row-level matches stay in data/processed (local)."""
+# row-level matches stay local
 import time
 
 import duckdb
@@ -7,7 +7,7 @@ import pandas as pd
 from .config import AGG, PROC
 from .lexicons import (BRAINROT_CORE_RE, BRAINROT_EXT_RE, DOOM_RE, PREFILTER, SIGMA_RE, clean_sql)
 
-MATCHES = PROC / "derived" / "lexicon_matches.parquet"      # sub-folder: the row-level globs *.parquet in PROC must not see it
+MATCHES = PROC / "derived" / "lexicon_matches.parquet"  # subfolder so PROC/*.parquet globs skip it
 TIERS = {"core": "core_terms", "extended": "ext_terms", "sigma": "sigma_terms", "doom": "doom_terms"}
 
 
@@ -18,7 +18,6 @@ def _con():
 
 
 def build_matches():
-    """One pass over all text: keep the rows that contain any lexicon term, with the matched strings per tier."""
     MATCHES.parent.mkdir(exist_ok=True)
     con = _con()
     t0 = time.time()
@@ -45,7 +44,6 @@ def build_matches():
 
 
 def lexicon_monthly(min_tokens=50_000):
-    """Hits per 10,000 words and reach (share of rows with a hit), per tier x type x subreddit x month."""
     con = _con()
     hits = con.execute(f"""
         SELECT type, subreddit, date_trunc('month', ts) AS month, tier,
@@ -68,8 +66,6 @@ def lexicon_monthly(min_tokens=50_000):
 
 
 def term_counts():
-    """How often each individual term occurs: per day (lexicon_terms_daily, event-time charts), per month (lexicon_terms_by_month,
-    stream graphs) and per year (lexicon_terms_by_year, checks)."""
     con = _con()
     d = con.execute(f"""
         SELECT CAST(ts AS DATE) AS day, type, subreddit, tier, lower(term) AS term, count(*) AS n
@@ -90,12 +86,10 @@ def term_counts():
     return d
 
 
-# ------------------------------------------------------------------ emoji
-EMOJI_RE = r"[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B50}\x{2B55}]"      # emoticon, symbol and pictograph blocks
+EMOJI_RE = r"[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B50}\x{2B55}]"  # rough, no ZWJ/flag merge
 
 
 def emoji_monthly():
-    """Emoji code points per 10,000 words by type x subreddit x month (approximation: no ZWJ/flag merging)."""
     con = _con()
     df = con.execute(f"""
         SELECT type, subreddit, date_trunc('month', ts) AS month,
@@ -108,13 +102,12 @@ def emoji_monthly():
     return df
 
 
-# ------------------------------------------------------------------ MTLD, readability, sentiment
 MTLD_TOKENS, VADER_N, FLESCH_N = 5000, 2000, 400
 URL = r"https?://\S+|www\.\S+"
 
 
 def _cell_metrics(args):
-    """Metrics for one subreddit-month. `rows` = DataFrame sorted by random rank."""
+    # rows sorted by random rank
     import re
 
     import numpy as np
@@ -124,13 +117,13 @@ def _cell_metrics(args):
     sub, month, texts, ntok = args
     clean = [re.sub(URL, " ", t) for t in texts]
     out = {"subreddit": sub, "month": month}
-    # MTLD on the first random comments that add up to a fixed number of tokens
+    # fixed-size random sample
     cum = np.cumsum(ntok)
     k = int(np.searchsorted(cum, MTLD_TOKENS)) + 1
     if cum[-1] >= MTLD_TOKENS:
         out["mtld"] = LexicalRichness(" ".join(clean[:k])).mtld(threshold=0.72)
         out["mtld_words"] = int(cum[min(k, len(cum)) - 1])
-    # readability on comments with at least 10 tokens
+    # >=10 tokens only
     long_ = [c for c, n in zip(clean[:FLESCH_N * 3], ntok[:FLESCH_N * 3]) if n >= 10][:FLESCH_N]
     if len(long_) >= 30:
         out["flesch_median"] = float(np.median([textstat.flesch_reading_ease(c) for c in long_]))
@@ -143,7 +136,6 @@ def _cell_metrics(args):
 
 
 def text_metrics_monthly(workers=6):
-    """MTLD (fixed 5,000-token random samples), Flesch (median of up to 400 comments) and VADER (up to 2,000 comments)."""
     from concurrent.futures import ProcessPoolExecutor
     con = _con()
     t0 = time.time()
@@ -164,10 +156,9 @@ def text_metrics_monthly(workers=6):
     return out
 
 
-# ------------------------------------------------------------------ words and bigrams: early vs late
 PERIODS = {"early": ("2013-01-01", "2017-01-01"), "late": ("2023-01-01", "2026-10-01")}
 GROUP_SUBS = {"short_form": ["memes", "teenagers"], "long_form": ["books", "explainlikeimfive"]}
-ARTIFACTS = ("amp", "gt", "lt", "x200b", "nbsp", "deleted", "removed", "giphy", "emote", "img", "gif")           # markdown / export leftovers
+ARTIFACTS = ("amp", "gt", "lt", "x200b", "nbsp", "deleted", "removed", "giphy", "emote", "img", "gif")  # md/export junk
 
 
 def _stop_sql():
@@ -177,7 +168,6 @@ def _stop_sql():
 
 
 def words_period():
-    """Word counts per group x period (comments), and the same for bigrams on a fixed random sample."""
     from .lexicons import TOKEN_RE_SQL
     con = _con()
     rows, bi = [], []
@@ -206,7 +196,6 @@ def words_period():
     pd.concat(bi).to_parquet(AGG / "bigram_counts_period.parquet", index=False)
 
 
-# ------------------------------------------------------------------ per-comment features for H4
 FEATURES = PROC / "derived"
 
 
@@ -217,8 +206,7 @@ def _vader_chunk(texts):
 
 
 def build_features(workers=6, chunk=40_000):
-    """Per comment: VADER compound, hits of the crisis lexicon, hits per event lexicon, doomscroll hits.
-    One Parquet file per subreddit in data/processed/derived/ (row-level, local)."""
+    # row-level, local only
     from concurrent.futures import ProcessPoolExecutor
 
     from .lexicons import CRISIS_RE, EVENT_RE

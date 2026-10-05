@@ -1,9 +1,4 @@
-"""Checks and look-ups behind the numbers quoted in the notebook text.
-
-Run `python -m src.checks` to print them and write the numeric ones to docs/numbers_checked.md. Every sentence in the
-notebooks that quotes a number not printed in a chart title comes from one of these functions. Functions marked
-"row-level" print comment or thread text: they print to the terminal only and are never saved or committed.
-"""
+# row-level fns: terminal only, never saved
 import random
 import re
 import sys
@@ -22,7 +17,6 @@ _log = []
 
 
 def show(title, df):
-    """Print a table and keep it for docs/numbers_checked.md."""
     text = df.to_string() if hasattr(df, "to_string") else str(df)
     print(f"\n== {title}\n{text}")
     _log.append(f"### {title}\n\n```\n{text}\n```\n")
@@ -34,9 +28,7 @@ def _con():
     return con
 
 
-# ------------------------------------------------------------------ raw data and cleaning (data section of notebook 01)
 def raw_profile():
-    """First inspection of the raw files: rows per subreddit and type, date range, deleted authors, bots, removed text."""
     con = _con()
     out = []
     for kind, text in (("comments", "body"), ("submissions", "selftext")):
@@ -52,7 +44,7 @@ def raw_profile():
 
 
 def repeated_texts(min_copies=300, top=25):
-    """Row-level (terminal only): most repeated comment openings. This is how the moderator templates were found."""
+    # row-level, terminal only
     con = _con()
     df = con.execute(f"""
         SELECT left(body, 70) AS opening, count(*) AS copies, count(DISTINCT author) AS authors, max((distinguished = 'moderator')::INT) AS moderator
@@ -63,7 +55,7 @@ def repeated_texts(min_copies=300, top=25):
 
 
 def spam_candidates(top=10):
-    """Row-level (terminal only): the longest comments with the fewest distinct words in the cleaned data's raw source."""
+    # row-level, terminal only
     con = _con()
     df = con.execute(f"""
         SELECT subreddit, year(make_timestamp(created_utc * 1000000)) AS year, count(*) AS comments, count(DISTINCT author) AS authors,
@@ -74,10 +66,8 @@ def spam_candidates(top=10):
     return df
 
 
-# ------------------------------------------------------------------ notebook 01 (overview and activity)
 def spike_context(days=("2020-04-15", "2021-02-12", "2021-12-30", "2024-01-25", "2024-03-22", "2024-08-16", "2024-12-19", "2025-09-11")):
-    """Why were these r/nosurf days busy? Threads per day, share of the biggest thread and of the top three (numbers are saved);
-    the titles of the two biggest threads are printed to the terminal only (row-level)."""
+    # thread titles printed only, row-level
     con = _con()
     q = f"""
         WITH c AS (SELECT ts::date AS d, link_id, count(*) AS n FROM read_parquet('{PROC}/comment_nosurf.parquet') GROUP BY 1, 2),
@@ -99,10 +89,8 @@ def spike_context(days=("2020-04-15", "2021-02-12", "2021-12-30", "2024-01-25", 
     return sel
 
 
-# ------------------------------------------------------------------ notebook 02 (text)
 def lexicon_spot_check(n=50, seed=42):
-    """Row-level (terminal only): random matches in context per lexicon tier, as used for the hand check (50 per tier read by one
-    person; this draw is reproducible but is not the exact draw that was read, because the lexicon was tightened afterwards)."""
+    # not the draw we read, lexicon tightened since
     from .textmining import MATCHES
     df = _con().execute(f"""SELECT year(ts) AS y, subreddit, text, core_terms, ext_terms, sigma_terms, doom_terms FROM read_parquet('{MATCHES}')""").df()
     rng = random.Random(seed)
@@ -117,9 +105,7 @@ def lexicon_spot_check(n=50, seed=42):
                 print(f"[{r.y} {r.subreddit[:5]}] ...{r.text[a:m.end() + 50]!r}")
 
 
-# ------------------------------------------------------------------ notebook 03 (H4)
 def phase4_numbers():
-    """Numbers quoted in notebook 03."""
     daily = ev.load_daily()
     rows = []
     for s in ORDER:
@@ -164,9 +150,7 @@ def phase4_numbers():
 
 
 def youtube_trending_profile(countries=("US", "GB", "CA", "IN")):
-    """What the Kaggle YouTube trending files hold: coverage, unique videos, brainrot-titled videos (with and without the Roblox game
-    "Steal a Brainrot") per publish quarter, for the rsrishav files (2020-2024) and the keshavbansal95 file (2024-25).
-    Also writes data/external/youtube_trending_monthly.parquet."""
+    # also writes youtube_trending_monthly.parquet
     from .external import trending_monthly, trending_videos, trending_videos_2024_25
     rows = []
     for c in countries:
@@ -186,8 +170,7 @@ def youtube_trending_profile(countries=("US", "GB", "CA", "IN")):
 
 
 def brainrot_event_check(subs=None):
-    """Brainrot terms around the events: per term group and event, rate per 10,000 words in the 8 weeks before and the 4 weeks after,
-    the change, hits after and the placebo p-value. subs=None pools all six subreddits; pass ["memes", "teenagers"] for short-form."""
+    # subs=None pools all six
     df = ev.term_event_effects(subs)
     label = ", ".join(subs) if subs else "pooled six subreddits"
     show(f"brainrot terms around events, per 10,000 words ({label})", df.round(3).set_index(["event", "term"]))
@@ -199,8 +182,7 @@ def brainrot_event_check_shortform():
 
 
 def volume_event_check():
-    """Exact comments per day (monthly totals divided by days in the month) of r/memes + r/teenagers: mean of the 3 months before the event
-    month vs the 3 months after it, per event. Monthly resolution cannot show effects that last days."""
+    # monthly res only
     t = pd.read_parquet(AGG / "monthly_totals.parquet")
     t = t[t.subreddit.isin(["memes", "teenagers"]) & (t.type == "comment")]
     per_day = t.assign(v=t.total / t.month.dt.days_in_month).groupby("month")["v"].sum()
@@ -214,9 +196,7 @@ def volume_event_check():
 
 
 def brainrot_spike_check(months=("2023-10-01", "2023-11-01", "2024-04-01", "2024-12-01", "2025-01-01")):
-    """What the brainrot spikes of r/memes + r/teenagers (monthly rate per 10,000 words) are made of: the top months, the terms behind the chosen
-    months, how many of the matching comments mention a crisis topic or TikTok, and the crisis-word rate of the same subreddits (monthly,
-    median of all months for comparison). Answers whether the later spikes came with a crisis; exploratory, the events were not chosen in advance."""
+    # exploratory, events picked after the spikes
     sh = ["memes", "teenagers"]
     tt = pd.read_parquet(AGG / "lexicon_terms_by_month.parquet")
     tt = tt[(tt.type == "comment") & tt.tier.isin(["core", "extended"]) & tt.subreddit.isin(sh)]
@@ -244,7 +224,6 @@ def brainrot_spike_check(months=("2023-10-01", "2023-11-01", "2024-04-01", "2024
 
 
 def doomscroll_trend_check():
-    """r/nosurf doomscroll mentions per 10,000 words: per year, and the latest 4-week rolling rate (complete data, weekly resolution is valid)."""
     d = ev.load_daily()
     d = d[d.subreddit == "nosurf"].set_index("day")[["hits_doom", "tokens"]]
     yr = d.groupby(d.index.year).sum()
@@ -255,8 +234,7 @@ def doomscroll_trend_check():
 
 
 def rhythm_check(n_fake=150):
-    """r/nosurf hour-by-weekday comment share, 4 weeks after minus 8 weeks before each event: the largest single-cell shift, and the
-    95th percentile of that largest shift at random fake dates (the null result mentioned in the H4 text; the chart was removed)."""
+    # null result, chart gone
     df = ev.nosurf_comments()
     ts = df["ts"]
     rng = np.random.default_rng(42)
@@ -278,7 +256,6 @@ def rhythm_check(n_fake=150):
 
 
 def session_bucket_check():
-    """r/nosurf sessions of 2+ messages by length bucket (share in %), 8 weeks before vs 4 weeks after each event."""
     ss = ev.nosurf_sessions()
     bk = [(1, 1, "1 min"), (2, 4, "2-4"), (5, 9, "5-9"), (10, 29, "10-29"), (30, 1e9, "30+")]
     rows = []
@@ -293,15 +270,12 @@ def session_bucket_check():
 
 
 def authors_check():
-    """Same r/nosurf authors before and after each event: number of authors, mean change in tone, 95% bootstrap interval, and the 95% range
-    of the mean change at random fake dates."""
     D, CI, lo, hi = ev.authors_stats()
     rows = [dict(event=n, authors=len(D[n]), mean_change=D[n].mean(), ci_low=CI[n][0], ci_high=CI[n][1]) for n in EVENTS]
     show(f"same r/nosurf authors: change in mean tone (random-date 95% range {lo:+.3f} to {hi:+.3f})", pd.DataFrame(rows).round(3).set_index("event"))
 
 
 def session_shift_check():
-    """Largest length-bucket shift of r/nosurf sessions per event and its placebo p-value (same statistic at 100 random fake dates)."""
     st = ev.session_stats()
     rows = [dict(event=n, bucket=st["big"][n][2], before=st["big"][n][0], after=st["big"][n][1], gap=abs(st["big"][n][1] - st["big"][n][0])) for n in EVENTS]
     df = pd.DataFrame(rows).round(1).set_index("event")

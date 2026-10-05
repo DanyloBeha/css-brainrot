@@ -1,4 +1,3 @@
-"""Checks on the processed Parquet: schema (pandera), reconciliation with raw, missingness."""
 import duckdb
 import pandera.pandas as pa
 
@@ -20,7 +19,6 @@ SCHEMA = pa.DataFrameSchema({
 
 
 def sample(n=200_000, seed=42):
-    """Random sample of processed rows (reproducible)."""
     con = duckdb.connect()
     con.execute("SET TimeZone = 'UTC'")
     return con.execute(
@@ -29,7 +27,7 @@ def sample(n=200_000, seed=42):
 
 
 def reconcile():
-    """Processed row counts = raw rows minus logged drops, per type and subreddit."""
+    # processed = raw - logged drops
     con = duckdb.connect()
     log = con.execute(f"SELECT * FROM read_parquet('{AGG / 'cleaning_counts.parquet'}')").df()
     real = con.execute(
@@ -41,15 +39,14 @@ def reconcile():
 
 
 def vader_label_sample(n=100, path=None):
-    """100 random comments (8-120 words) with their VADER score and an empty `human_label` column for hand labeling.
-    Row-level text: written to data/processed/derived/ (not committed)."""
+    # row-level text, not committed
     from nltk.sentiment import SentimentIntensityAnalyzer
     con = duckdb.connect()
     df = con.execute(f"""SELECT id, subreddit, year(ts) AS year, text FROM read_parquet('{PROC}/comment_*.parquet')
                          WHERE n_tokens BETWEEN 8 AND 120 ORDER BY hash(id || 'vader') LIMIT {n}""").df()
     sia = SentimentIntensityAnalyzer()
     df["vader_compound"] = [sia.polarity_scores(t)["compound"] for t in df.text]
-    df["human_label"] = ""                                   # fill with: pos / neg / neutral
+    df["human_label"] = ""  # TODO hand-label pos/neg/neutral
     path = path or PROC / "derived" / "vader_validation_sample.csv"
     df.to_csv(path, index=False)
     return path

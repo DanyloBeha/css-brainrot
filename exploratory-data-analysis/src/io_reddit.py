@@ -1,25 +1,7 @@
-"""Raw Arctic Shift Parquet -> one common-schema Parquet file per type and subreddit.
-
-Common schema (comments and submissions share it, so one table serves group-level
-and event-level views; analyses still filter on `type`):
-
-    id, type, author_id, ts (UTC), subreddit, text, score, link_id, num_comments,
-    slot_start, n_tokens
-
-* comments:    text = body
-* submissions: text = title + "\\n" + selftext (selftext dropped when empty or removed);
-               link_id = "t3_" + id so comments can be joined to their submission.
-* author_id is a 12-char md5 hash; NULL when the account was deleted (the text is kept,
-  so text metrics do not lose ~10% of rows, but author-level analyses skip them).
-* slot_start is the start of the time slot the sample was drawn from (needed for
-  sessionization, because only whole slots were downloaded).
-* n_tokens counts tokens with the shared tokenizer in lexicons.py.
-
-Cleaning rules (in this order, each row counted once): bot accounts; moderator/admin-distinguished
-comments (official moderation messages); templated text (first 100 characters seen >= 300 times in
-the whole archive: removal notices, rule reminders, link bots); empty or removed text; spam
-(>= 100 words with fewer than 15% distinct words); duplicate ids.
-"""
+# comments + submissions share one schema, filter on type
+# author_id = md5, NULL if account deleted (text kept)
+# slot_start needed for sessions: only whole slots downloaded
+# clean order: bots, mod msgs, templates, empty, spam, dupes
 import time
 
 import duckdb
@@ -47,7 +29,6 @@ def _dist_sql(kind):
 
 
 def make_templates(con):
-    """Texts (first 100 characters) that occur at least TEMPLATE_MIN_COPIES times among comments."""
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE templates AS
         SELECT left(body, 100) AS t FROM read_parquet('{RAW / "comments"}/*/*/*.parquet', hive_partitioning=false)
@@ -62,7 +43,6 @@ def _extra_sql(kind):
 
 
 def build_one(con, kind, subreddit):
-    """Convert one (kind, subreddit). Returns the drop-reason counts as a dict."""
     src = RAW / kind / f"subreddit={subreddit}" / "year=*" / "*.parquet"
     out = PROC / f"{KINDS[kind]}_{subreddit}.parquet"
     con.execute(f"""

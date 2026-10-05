@@ -1,10 +1,4 @@
-"""Small cached tables (data/aggregates/*.parquet) that every notebook plots from.
-
-Sampling note: the raw files hold whole time slots drawn at random per subreddit-month,
-about 10k comments / 2k posts each. Shares, medians and rates are fine to compute on the
-sample; volumes need the exact monthly totals. When months of different sampling fraction
-are pooled, rows are weighted by weight = monthly_total / sampled_rows.
-"""
+# sample only, pool months weighted total / sampled rows
 import json
 
 import duckdb
@@ -28,7 +22,6 @@ def _write(df, name):
 
 
 def monthly_totals():
-    """Exact monthly comments and posts per subreddit (long format)."""
     t = pd.read_csv(RAW / "_monthly_totals.csv")
     t["month"] = pd.to_datetime(t["month"] + "-01")
     long = t.melt(id_vars=["subreddit", "month"], value_vars=list(TYPES.values()),
@@ -38,7 +31,6 @@ def monthly_totals():
 
 
 def sample_weights():
-    """Per subreddit-month and type: raw sampled rows, exact total, coverage, weight, slot length."""
     con = _con()
     raw = []
     for kind, typ in (("comments", "comment"), ("submissions", "submission")):
@@ -56,7 +48,7 @@ def sample_weights():
     w["raw_rows"] = w["raw_rows"].fillna(0)
     w["coverage"] = (w["raw_rows"] / w["total"]).clip(upper=1)
     w["weight"] = (w["total"] / w["raw_rows"]).where(w["raw_rows"] > 0).clip(lower=1)
-    # slot length in minutes from the sampling plans
+    # slot minutes from sampling plan
     plans = {}
     for fn, typ in (("_sample_plan.json", "comment"), ("_sample_plan_posts.json", "submission")):
         for k, v in json.load(open(RAW / fn))["subreddit_months"].items():
@@ -67,7 +59,6 @@ def sample_weights():
 
 
 def overview_counts():
-    """Per type x subreddit x month: sample rows, authors, tokens, length and score stats."""
     con = _con()
     df = con.execute(f"""
         SELECT type, subreddit, date_trunc('month', ts) AS month,
@@ -100,19 +91,16 @@ def _weighted_hist(group_cols, value_sql, name, where=""):
 
 
 def length_hist():
-    """Weighted histogram of length in tokens, by type x subreddit x year (tokens capped at 3000)."""
     return _weighted_hist(["p.type AS type", "p.subreddit AS subreddit", "year(p.ts) AS year"],
                           "least(p.n_tokens, 3000)", "length_hist")
 
 
 def score_hist():
-    """Weighted histogram of score (clipped to -100..100000) by type x subreddit."""
     return _weighted_hist(["p.type AS type", "p.subreddit AS subreddit"],
                           "greatest(least(p.score, 100000), -100)", "score_hist")
 
 
 def score_by_length():
-    """Weighted rows per length bin (log2 of words), with how many score <= 0 or >= 10."""
     con = _con()
     w = AGG / "sample_weights.parquet"
     df = con.execute(f"""
@@ -128,14 +116,14 @@ def score_by_length():
 
 
 def hour_dow():
-    """Weighted activity by UTC weekday (1=Mon) x hour, per type x subreddit x year."""
+    # utc, 1=mon
     return _weighted_hist(
         ["p.type AS type", "p.subreddit AS subreddit", "year(p.ts) AS year",
          "isodow(p.ts) AS dow", "hour(p.ts) AS hour"], "1", "hour_dow")
 
 
 def author_activity():
-    """Messages per author (comments + submissions), counted inside the sample, per subreddit."""
+    # counted inside sample only
     con = _con()
     df = con.execute(f"""
         WITH per_author AS (
@@ -146,7 +134,7 @@ def author_activity():
 
 
 def daily_full_coverage(min_coverage=0.9):
-    """Daily counts for subreddit-months where (almost) every record is in the sample."""
+    # near-full coverage months only
     con = _con()
     w = AGG / "sample_weights.parquet"
     df = con.execute(f"""
@@ -173,7 +161,6 @@ def build_phase2():
 
 
 def raw_quality_monthly():
-    """Per type x subreddit x month, from the RAW sample: rows lost to each cleaning rule."""
     from .io_reddit import BOT_SQL
     con = _con()
     parts = []

@@ -1,4 +1,3 @@
-"""Compact analysis-ready table for the CSV deliverable: one row per subreddit-month, no empty cells."""
 import pandas as pd
 
 from .config import AGG, OUT, SUB2GROUP

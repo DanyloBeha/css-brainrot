@@ -1,9 +1,9 @@
-"""Gap-based sessions from posting timestamps (lurking is invisible). Valid only where every record is present (r/nosurf)."""
+# valid only with full coverage (r/nosurf)
 import polars as pl
 
 
 def sessions(lf: pl.LazyFrame, gap_minutes=30) -> pl.LazyFrame:
-    """One row per session: author, start, end, messages, minutes. `lf` needs author_id and ts (datetime)."""
+    # lf needs author_id, ts
     return (lf.filter(pl.col("author_id").is_not_null()).sort(["author_id", "ts"])
             .with_columns((pl.col("ts").diff().over("author_id") > pl.duration(minutes=gap_minutes))
                           .fill_null(True).cast(pl.Int32).alias("new"))
