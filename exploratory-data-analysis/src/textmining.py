@@ -68,22 +68,26 @@ def lexicon_monthly(min_tokens=50_000):
 
 
 def term_counts():
-    """How often each individual term occurs, per month (lexicon_terms_by_month, used by the stream graph C15b) and per year
-    (lexicon_terms_by_year, used by the checks)."""
+    """How often each individual term occurs: per day (lexicon_terms_daily, event-time charts), per month (lexicon_terms_by_month,
+    stream graphs) and per year (lexicon_terms_by_year, checks)."""
     con = _con()
-    df = con.execute(f"""
-        SELECT date_trunc('month', ts) AS month, type, subreddit, tier, lower(term) AS term, count(*) AS n
+    d = con.execute(f"""
+        SELECT CAST(ts AS DATE) AS day, type, subreddit, tier, lower(term) AS term, count(*) AS n
         FROM (
           SELECT ts, type, subreddit, 'core' AS tier, unnest(core_terms) AS term FROM read_parquet('{MATCHES}')
           UNION ALL SELECT ts, type, subreddit, 'extended', unnest(ext_terms) FROM read_parquet('{MATCHES}')
           UNION ALL SELECT ts, type, subreddit, 'sigma', unnest(sigma_terms) FROM read_parquet('{MATCHES}')
           UNION ALL SELECT ts, type, subreddit, 'doom', unnest(doom_terms) FROM read_parquet('{MATCHES}')
         ) GROUP BY ALL ORDER BY ALL""").df()
-    df.to_parquet(AGG / "lexicon_terms_by_month.parquet", index=False)
-    yr = df.assign(year=df["month"].dt.year).groupby(["year", "type", "subreddit", "tier", "term"], as_index=False)["n"].sum()
+    d["day"] = pd.to_datetime(d["day"])
+    d.to_parquet(AGG / "lexicon_terms_daily.parquet", index=False)
+    keys = ["type", "subreddit", "tier", "term"]
+    m = d.assign(month=d["day"].dt.to_period("M").dt.to_timestamp()).groupby(["month"] + keys, as_index=False)["n"].sum()
+    m.to_parquet(AGG / "lexicon_terms_by_month.parquet", index=False)
+    yr = d.assign(year=d["day"].dt.year).groupby(["year"] + keys, as_index=False)["n"].sum()
     yr.to_parquet(AGG / "lexicon_terms_by_year.parquet", index=False)
-    print(f"lexicon_terms_by_month: {len(df):,} rows; lexicon_terms_by_year: {len(yr):,} rows")
-    return df
+    print(f"lexicon_terms_daily: {len(d):,} rows; by_month: {len(m):,}; by_year: {len(yr):,}")
+    return d
 
 
 # ------------------------------------------------------------------ emoji
