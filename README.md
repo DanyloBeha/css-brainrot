@@ -49,3 +49,9 @@ H4: Crises intensify doomscrolling and negativity
 3. [Sleep & Doomscrolling Habits Dataset](https://www.kaggle.com/datasets/harpartapsingh13/sleep-and-doomscrolling-habits-dataset)
 4. [Social Media and Mental Health](https://www.kaggle.com/datasets/souvikahmed071/social-media-and-mental-health)
 5. [Student Social Media & Mental Health](https://www.kaggle.com/datasets/shivasingh4945/student-social-media-and-mental-health-impact)
+
+## Useful commands
+```sh
+# compile pdf document from jupyter notebook
+jupyter nbconvert --to pdf exploratory-data-analysis\eda.ipynb --no-input --no-prompt --template-file clean.tex.j2
+```
