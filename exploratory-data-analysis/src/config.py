@@ -6,9 +6,8 @@ RAW = ROOT / "data" / "reddit_arctic"
 PROC = ROOT / "data" / "processed"
 AGG = ROOT / "data" / "aggregates"
 EXT = ROOT / "data" / "external"
-FIG = ROOT / "figures"
 OUT = ROOT / "outputs"
-for p in (PROC, AGG, EXT, FIG, OUT):
+for p in (PROC, AGG, EXT, OUT):
     p.mkdir(parents=True, exist_ok=True)
 
 TEAM_ID, SEED = "FightClub", 42                        # team id taken from H2_FightClub.pdf
@@ -34,3 +33,7 @@ EVENTS = {
     "Hamas attack / Gaza war begins": "2023-10-07",
     "Assassination of Charlie Kirk": "2025-09-10",
 }
+
+ORDER = ["memes", "teenagers", "books", "explainlikeimfive", "todayilearned", "nosurf"]          # row order of the charts
+SHORT_EVENTS = {"COVID-19 pandemic declared": "COVID-19 declared", "Russia full-scale invasion of Ukraine": "Ukraine invasion",
+                "Hamas attack / Gaza war begins": "Gaza war", "Assassination of Charlie Kirk": "Kirk"}   # event names on the charts

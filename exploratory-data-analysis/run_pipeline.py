@@ -4,7 +4,7 @@
     python run_pipeline.py clean aggregates   # selected steps
 
 Opt-in step (downloads about 800 MB from Kaggle once): python run_pipeline.py external
-Steps, in order: clean -> aggregates -> text -> features -> events -> validate -> csv -> figures -> checks
+Steps, in order: clean -> aggregates -> text -> features -> events -> validate -> csv -> index -> checks
 """
 import sys
 import warnings
@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore")
 
 
 def main(steps):
-    from src import aggregates as ag, checks, events as ev, export, external, figs_crisis, figure_registry, io_reddit, textmining as tm, validate
+    from src import aggregates as ag, checks, events as ev, export, external, figure_registry, io_reddit, textmining as tm, validate
     if "clean" in steps:                      # raw -> data/processed (common schema, cleaning rules, counts)
         io_reddit.build_all()
         r = validate.reconcile()
@@ -33,22 +33,20 @@ def main(steps):
         tm.build_features()
     if "events" in steps:                     # daily table and event-study effects with placebo p-values
         ev.build_daily()
-        figs_crisis.effects_table()
-    if "validate" in steps:                   # V01 missingness chart, hand-label sample for VADER, World Uncertainty Index download
-        validate.missingness_figure()
+        ev.effects_table()
+    if "validate" in steps:                   # hand-label sample for VADER, World Uncertainty Index download
         validate.vader_label_sample()
         external.load_wui()
     if "external" in steps:                   # YouTube trending monthly table (Kaggle downloads, cached by kagglehub)
         external.trending_monthly()
     if "csv" in steps:
         export.build_csv()
-    if "figures" in steps:                    # redraw every PNG in figures/ and rewrite docs/figure_index.md
-        figure_registry.redraw_all()
+    if "index" in steps:                      # rewrite docs/figure_index.md (the H4 charts are drawn by the cells of eda.ipynb)
         figure_registry.render_index()
     if "checks" in steps:                     # numbers quoted in the notebook text -> docs/numbers_checked.md
         checks.main()
 
 
 if __name__ == "__main__":                    # the guard is needed: some steps use multiprocessing
-    ALL = ["clean", "aggregates", "text", "features", "events", "validate", "csv", "figures", "checks"]
+    ALL = ["clean", "aggregates", "text", "features", "events", "validate", "csv", "index", "checks"]
     main(sys.argv[1:] or ALL)
