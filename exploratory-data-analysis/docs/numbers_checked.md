@@ -24,255 +24,15 @@ Written by `python -m src.checks` (numeric tables only; row-level text is never 
 
 ```
                         d  comments  threads   top1  top1_share  top3_share
-3415  2020-04-15 00:00:00     238.0     49.0   59.0        0.25        0.52
-1667  2021-02-12 00:00:00     243.0     37.0   41.0        0.17        0.41
-1196  2021-12-30 00:00:00     270.0     38.0   89.0        0.33        0.63
-2393  2024-01-25 00:00:00     351.0     43.0  112.0        0.32        0.55
-1163  2024-03-22 00:00:00     367.0     43.0  122.0        0.33        0.53
-286   2024-08-16 00:00:00     342.0     49.0   93.0        0.27        0.55
-1317  2024-12-19 00:00:00     382.0     51.0  106.0        0.28        0.46
-2333  2025-09-11 00:00:00     530.0     58.0  160.0        0.30        0.72
+1047  2020-04-15 00:00:00     238.0     49.0   59.0        0.25        0.52
+3559  2021-02-12 00:00:00     243.0     37.0   41.0        0.17        0.41
+3907  2021-12-30 00:00:00     270.0     38.0   89.0        0.33        0.63
+1718  2024-01-25 00:00:00     351.0     43.0  112.0        0.32        0.55
+3720  2024-03-22 00:00:00     367.0     43.0  122.0        0.33        0.53
+2277  2024-08-16 00:00:00     342.0     49.0   93.0        0.27        0.55
+3579  2024-12-19 00:00:00     382.0     51.0  106.0        0.28        0.46
+1647  2025-09-11 00:00:00     530.0     58.0  160.0        0.30        0.72
 0                 typical     131.0     33.0    NaN        0.21        0.43
-```
-
-### records per year and subreddit (millions)
-
-```
-year                          2012  2013  2014  2015  2016  2017  2018   2019   2020   2021   2022   2023   2024  2025  2026
-type       subreddit                                                                                                        
-comment    books              0.32  0.53  0.84  0.84  0.86  0.99  0.96   0.82   0.87   1.19   1.39   1.31   1.01  0.71  0.50
-           explainlikeimfive  0.48  1.13  2.20  2.64  1.93  1.55  1.08   1.05   1.18   1.32   1.53   1.48   1.45  1.18  0.87
-           memes              0.01  0.03  0.03  0.02  0.03  0.23  2.80  19.30  34.50  26.04  11.61   5.59   3.46  2.83  2.07
-           nosurf             0.00  0.00  0.00  0.00  0.00  0.01  0.02   0.03   0.05   0.05   0.05   0.05   0.07  0.08  0.05
-           teenagers          0.56  2.84  2.66  0.97  1.01  2.96  3.94  17.01  17.91  22.33  22.36  12.32  10.66  8.68  7.06
-           todayilearned      3.20  5.06  5.61  6.25  5.71  5.75  6.33   5.94   6.24   4.60   3.21   3.49   3.24  2.88  2.42
-submission books              0.03  0.04  0.05  0.07  0.08  0.07  0.06   0.05   0.07   0.07   0.07   0.07   0.07  0.07  0.03
-           explainlikeimfive  0.04  0.11  0.21  0.26  0.24  0.24  0.14   0.15   0.16   0.12   0.10   0.07   0.07  0.05  0.03
-           memes              0.02  0.03  0.02  0.02  0.03  0.08  0.42   2.96   4.31   2.16   0.82   0.46   0.31  0.14  0.08
-           nosurf             0.00  0.00  0.00  0.00  0.00  0.00  0.00   0.00   0.01   0.01   0.01   0.01   0.01  0.01  0.01
-           teenagers          0.02  0.09  0.13  0.07  0.07  0.23  0.39   1.91   1.96   1.56   1.30   0.81   0.79  0.61  0.37
-           todayilearned      0.25  0.26  0.21  0.22  0.20  0.18  0.16   0.15   0.16   0.11   0.07   0.06   0.06  0.05  0.03
-```
-
-### share of comments removed/deleted and bot, by year
-
-```
-          removed_rows                                                         bot_rows                                                        
-subreddit        books explainlikeimfive  memes nosurf teenagers todayilearned    books explainlikeimfive  memes nosurf teenagers todayilearned
-year                                                                                                                                           
-2012             0.063             0.069  0.088  0.109     0.097         0.081    0.001             0.001  0.004  0.000     0.000         0.001
-2013             0.071             0.088  0.091  0.086     0.084         0.080    0.002             0.002  0.044  0.000     0.001         0.002
-2014             0.070             0.116  0.089  0.084     0.071         0.073    0.011             0.004  0.071  0.005     0.006         0.005
-2015             0.068             0.109  0.084  0.043     0.076         0.060    0.020             0.011  0.075  0.001     0.011         0.002
-2016             0.076             0.152  0.086  0.066     0.076         0.064    0.024             0.027  0.050  0.000     0.010         0.003
-2017             0.070             0.166  0.068  0.113     0.050         0.061    0.019             0.037  0.019  0.008     0.007         0.003
-2018             0.065             0.157  0.058  0.085     0.041         0.059    0.019             0.032  0.092  0.007     0.005         0.003
-2019             0.075             0.143  0.096  0.076     0.043         0.062    0.025             0.034  0.064  0.067     0.006         0.003
-2020             0.078             0.132  0.130  0.089     0.051         0.072    0.031             0.045  0.047  0.134     0.009         0.003
-2021             0.074             0.138  0.112  0.102     0.054         0.085    0.023             0.032  0.036  0.122     0.006         0.003
-2022             0.062             0.131  0.091  0.078     0.049         0.075    0.022             0.025  0.030  0.122     0.008         0.003
-2023             0.037             0.087  0.075  0.036     0.033         0.058    0.021             0.020  0.057  0.106     0.011         0.002
-2024             0.014             0.057  0.058  0.011     0.020         0.035    0.051             0.022  0.058  0.099     0.017         0.002
-2025             0.018             0.045  0.060  0.019     0.029         0.033    0.075             0.020  0.013  0.100     0.013         0.002
-2026             0.018             0.051  0.067  0.093     0.042         0.036    0.042             0.012  0.009  0.067     0.011         0.001
-```
-
-### share of messages written by the top 1% of authors
-
-```
-books                0.209
-explainlikeimfive    0.240
-memes                0.149
-nosurf               0.236
-teenagers            0.288
-todayilearned        0.167
-```
-
-### exact comments per submission, 2015 and 2025
-
-```
-type                    comment  submission  ratio
-subreddit         year                            
-books             2015   839226       67023   12.5
-                  2025   710877       70197   10.1
-explainlikeimfive 2015  2641193      264422   10.0
-                  2025  1182312       47974   24.6
-memes             2015    20338       15522    1.3
-                  2025  2827274      139536   20.3
-nosurf            2015     1304         314    4.2
-                  2025    81680        7977   10.2
-teenagers         2015   969574       65406   14.8
-                  2025  8678096      609736   14.2
-todayilearned     2015  6248159      217651   28.7
-                  2025  2879612       54449   52.9
-```
-
-### emoji concentration, r/teenagers 2018-01
-
-```
-    emoji   top1    top5  authors  top5_share
-0  2497.0  495.0  1531.0     1097        0.61
-```
-
-### comment length and very short share (12-month means)
-
-```
-                  first_month  len_first  len_low low_month  len_last  short_first  short_peak short_peak_month  short_last
-subreddit                                                                                                                  
-books                 2012-06       23.7     23.6   2012-07      26.6         10.8        11.1          2014-04         8.1
-explainlikeimfive     2012-06       30.2     29.1   2014-11      30.8         10.2        10.3          2013-02         7.0
-memes                 2017-01        9.0      5.7   2019-06      11.6         33.0        49.7          2019-09        24.2
-nosurf                2017-12       38.6     26.1   2026-07      26.4          8.8        13.3          2020-06        12.7
-teenagers             2012-06       15.8      5.2   2022-08       7.2         19.1        50.6          2022-08        40.7
-todayilearned         2012-06       15.3     15.1   2018-05      16.4         16.8        18.0          2018-05        14.9
-```
-
-### MTLD and Flesch medians, 2012-14 vs 2024-26
-
-```
-                   mtld_12_14  mtld_24_26  flesch_12_14  flesch_24_26
-subreddit                                                            
-books                   109.9       116.2          72.6          70.6
-explainlikeimfive        92.5       101.6          67.2          66.5
-memes                   129.6       152.8          80.3          74.5
-nosurf                   95.6       123.3          72.6          71.1
-teenagers               118.2       147.6          80.7          77.8
-todayilearned           123.4       137.7          72.0          69.9
-```
-
-### VADER 12-month mean: first, peak, last
-
-```
-                   first   peak peak_month   last
-subreddit                                        
-books              0.255  0.266    2013-05  0.170
-explainlikeimfive  0.133  0.143    2020-08  0.115
-memes              0.055  0.057    2012-09  0.037
-nosurf             0.362  0.363    2017-07  0.159
-teenagers          0.167  0.167    2012-06  0.052
-todayilearned      0.042  0.055    2022-05  0.045
-```
-
-### emoji per 10,000 words (12-month mean): max and last
-
-```
-                     max   last
-subreddit                      
-books               11.5   10.1
-explainlikeimfive    3.3    3.2
-memes              184.1   38.5
-nosurf              14.0   14.0
-teenagers          399.3  117.3
-todayilearned        9.6    9.3
-```
-
-### brainrot (core+extended) per 10,000 words: peak month
-
-```
-             subreddit      month  per_10k   reach
-173              books 2026-06-01   0.3165  0.0012
-324  explainlikeimfive 2024-04-01   1.6394  0.0058
-441              memes 2023-11-01   6.8952  0.0094
-566             nosurf 2025-01-01   1.9566  0.0097
-718          teenagers 2022-12-01   5.5168  0.0054
-936      todayilearned 2026-05-01   0.2008  0.0003
-```
-
-### brainrot per 10,000 words: 2025 mean and last six months
-
-```
-                   2025  last6
-subreddit                     
-books              0.08   0.10
-explainlikeimfive  0.02   0.01
-memes              1.15   0.36
-nosurf             1.17   0.77
-teenagers          1.37   0.41
-todayilearned      0.04   0.07
-```
-
-### reach: peak
-
-```
-             subreddit      month     reach  one_in
-173              books 2026-06-01  0.001212   825.0
-324  explainlikeimfive 2024-04-01  0.005828   172.0
-441              memes 2023-11-01  0.009411   106.0
-566             nosurf 2025-01-01  0.009671   103.0
-737          teenagers 2024-07-01  0.005479   183.0
-918      todayilearned 2024-11-01  0.000381  2628.0
-```
-
-### core tier per 10,000 words: peak month
-
-```
-              subreddit      month  per_10k_words
-692               books 2026-06-01          0.317
-1296  explainlikeimfive 2024-04-01          1.466
-1984              memes 2023-11-01          4.243
-2748             nosurf 2025-01-01          1.881
-3432          teenagers 2024-07-01          3.287
-4156      todayilearned 2024-11-01          0.103
-```
-
-### extended tier per 10,000 words: peak month
-
-```
-              subreddit      month  per_10k_words
-625               books 2025-01-01          0.102
-1297  explainlikeimfive 2024-04-01          0.174
-1985              memes 2023-11-01          2.652
-2729             nosurf 2024-08-01          0.183
-3357          teenagers 2022-12-01          5.416
-4125      todayilearned 2024-03-01          0.134
-```
-
-### term shares by year (%) and hits per year
-
-```
-      brain rot  brainrot  gyatt  other  rizz  skibidi  tung tung    hits
-year                                                                     
-2022        7.0       4.0    1.0    6.0  83.0      0.0        0.0   103.0
-2023        8.0       4.0    9.0    4.0  52.0     23.0        0.0   541.0
-2024       24.0      17.0    5.0    4.0  19.0     31.0        0.0  1092.0
-2025       34.0      38.0    2.0    2.0  12.0     12.0        0.0   942.0
-2026       42.0      41.0    0.0    1.0   7.0      5.0        3.0   409.0
-```
-
-### log-odds words, short_form
-
-```
-       gained     lost
-0         bro   school
-1       women  friends
-2         men   really
-3   literally     haha
-4        game  college
-5      people     edit
-6       trans   thanks
-7         idk    class
-8          ur   pretty
-9        real  awesome
-10      human     year
-11      woman   friend
-```
-
-### log-odds words, long_form
-
-```
-        gained        lost
-0          lol        edit
-1           ai      thanks
-2     finished     awesome
-3        water  government
-4      started        wage
-5      romance     ender's
-6       energy          tl
-7    literally      amazon
-8         heat       movie
-9   absolutely       great
-10        lmao      pretty
-11       speed     minimum
 ```
 
 ### crisis words per 10,000: 3-month peak and monthly median
@@ -403,4 +163,203 @@ books                                         2013-08, 2017-12, 2023-02
 explainlikeimfive                                      2017-06, 2022-08
 todayilearned                                                   2017-03
 nosurf                               2017-01, 2017-08, 2021-10, 2023-12
+```
+
+### brainrot terms around events, per 10,000 words (pooled six subreddits)
+
+```
+                                                   pre   post  change  hits_post  placebo_p
+event                                 term                                                 
+COVID-19 pandemic declared            rizz       0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine rizz       0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        rizz       0.125  0.102  -0.023         15      0.563
+Assassination of Charlie Kirk         rizz       0.055  0.036  -0.020          7      0.610
+COVID-19 pandemic declared            skibidi    0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine skibidi    0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        skibidi    0.024  0.082   0.057         12      0.240
+Assassination of Charlie Kirk         skibidi    0.067  0.046  -0.021          9      0.447
+COVID-19 pandemic declared            gyatt      0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine gyatt      0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        gyatt      0.006  0.048   0.042          7      0.000
+Assassination of Charlie Kirk         gyatt      0.006  0.010   0.004          2      0.443
+COVID-19 pandemic declared            brain rot  0.011  0.000  -0.011          0      0.857
+Russia full-scale invasion of Ukraine brain rot  0.000  0.015   0.015          2      0.780
+Hamas attack / Gaza war begins        brain rot  0.028  0.027  -0.000          4      1.000
+Assassination of Charlie Kirk         brain rot  0.225  0.259   0.035         51      0.540
+COVID-19 pandemic declared            tung tung  0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine tung tung  0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        tung tung  0.000  0.000   0.000          0      1.000
+Assassination of Charlie Kirk         tung tung  0.003  0.005   0.002          1      0.213
+COVID-19 pandemic declared            mewing     0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine mewing     0.007  0.007   0.001          1      0.747
+Hamas attack / Gaza war begins        mewing     0.000  0.007   0.007          1      0.457
+Assassination of Charlie Kirk         mewing     0.000  0.020   0.020          4      0.103
+```
+
+### brainrot terms around events, per 10,000 words (memes, teenagers)
+
+```
+                                                   pre   post  change  hits_post  placebo_p
+event                                 term                                                 
+COVID-19 pandemic declared            rizz       0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine rizz       0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        rizz       0.715  0.676  -0.039         15      0.783
+Assassination of Charlie Kirk         rizz       0.223  0.211  -0.012          7      0.937
+COVID-19 pandemic declared            skibidi    0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine skibidi    0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        skibidi    0.128  0.541   0.412         12      0.200
+Assassination of Charlie Kirk         skibidi    0.319  0.272  -0.047          9      0.553
+COVID-19 pandemic declared            gyatt      0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine gyatt      0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        gyatt      0.037  0.225   0.189          5      0.023
+Assassination of Charlie Kirk         gyatt      0.016  0.060   0.044          2      0.283
+COVID-19 pandemic declared            brain rot  0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine brain rot  0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        brain rot  0.073  0.045  -0.028          1      0.827
+Assassination of Charlie Kirk         brain rot  0.382  0.785   0.403         26      0.207
+COVID-19 pandemic declared            tung tung  0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine tung tung  0.000  0.000   0.000          0      1.000
+Hamas attack / Gaza war begins        tung tung  0.000  0.000   0.000          0      1.000
+Assassination of Charlie Kirk         tung tung  0.016  0.030   0.014          1      0.113
+COVID-19 pandemic declared            mewing     0.000  0.000   0.000          0      1.000
+Russia full-scale invasion of Ukraine mewing     0.024  0.000  -0.024          0      0.563
+Hamas attack / Gaza war begins        mewing     0.000  0.045   0.045          1      0.443
+Assassination of Charlie Kirk         mewing     0.000  0.121   0.121          4      0.123
+```
+
+### short-form comments per day: 3 months before vs 3 months after the event month
+
+```
+                                         before     after  change_pct
+event                                                                
+COVID-19 pandemic declared             116093.1  150821.5        29.9
+Russia full-scale invasion of Ukraine  130873.5  106335.4       -18.7
+Hamas attack / Gaza war begins          47431.1   37496.3       -20.9
+Assassination of Charlie Kirk           33981.4   33241.9        -2.2
+```
+
+### brainrot per 10,000 words (memes + teenagers): top months
+
+```
+month
+2023-11-01    4.61
+2024-04-01    3.28
+2023-12-01    3.20
+2025-01-01    2.90
+2024-07-01    2.74
+2024-06-01    2.66
+```
+
+### top terms (hits) in the chosen months
+
+```
+         rizz  skibidi  gyatt  fanum tax  rizzler  mewing  brain rot  brainrot
+2023-10  16.0     15.0    5.0        4.0      NaN     NaN        NaN       NaN
+2023-11  18.0     64.0   19.0        NaN     10.0     NaN        NaN       NaN
+2024-04  20.0     22.0    NaN        NaN      NaN    14.0        6.0       NaN
+2024-12   7.0     24.0    NaN        NaN      NaN     NaN        3.0       6.0
+2025-01   8.0     12.0    NaN        NaN      NaN     NaN       14.0      37.0
+```
+
+### brainrot-hit comments mentioning a topic, chosen months
+
+```
+         hit comments  gaza/israel/palestine/hamas  war  iran  tiktok  ban  oxford/word of the year
+month                                                                                              
+2023-10            32                            0    0     0       0    0                        0
+2023-11            91                            0    1     0       4    0                        0
+2024-04            59                            0    0     0       3    0                        0
+2024-12            40                            0    0     0       3    0                        0
+2025-01            64                            0    0     0      12    4                        0
+```
+
+### crisis words per 10,000 (memes + teenagers), 2023-08 to 2025-02 (median of all months 6.0)
+
+```
+month
+2023-08-01     4.6
+2023-09-01     5.6
+2023-10-01    10.4
+2023-11-01     6.3
+2023-12-01     7.7
+2024-01-01     9.0
+2024-02-01     7.9
+2024-03-01     8.6
+2024-04-01    10.7
+2024-05-01     9.2
+2024-06-01     8.4
+2024-07-01     7.2
+2024-08-01     8.8
+2024-09-01     5.1
+2024-10-01     7.3
+2024-11-01     5.8
+2024-12-01    10.8
+2025-01-01     6.5
+2025-02-01     8.4
+```
+
+### r/nosurf doomscroll mentions per 10,000 words, by year
+
+```
+day
+2019    0.00
+2020    0.08
+2021    0.29
+2022    0.66
+2023    1.14
+2024    1.88
+2025    3.24
+2026    4.95
+```
+
+### r/nosurf doomscroll, 4-week rolling rate: latest and maximum
+
+```
+latest        3.835027
+max           6.291073
+max_week    2026-07-19
+```
+
+### r/nosurf daily rhythm: largest cell shift per event (pp) and the 95th percentile at random dates
+
+```
+COVID-19 pandemic declared               0.56
+Russia full-scale invasion of Ukraine    0.50
+Hamas attack / Gaza war begins           0.37
+Assassination of Charlie Kirk            0.77
+95% of random dates stay under           0.82
+```
+
+### r/nosurf sessions (2+ messages): share by length bucket, before vs after
+
+```
+                                      before                        after                       
+bucket                                 1 min 10-29   2-4  30+   5-9 1 min 10-29   2-4  30+   5-9
+event                                                                                           
+Assassination of Charlie Kirk           21.5  30.3  21.1  8.1  19.1  23.0  31.1  22.0  8.2  15.7
+COVID-19 pandemic declared              20.0  34.4  22.9  4.9  17.8  22.2  31.1  22.2  6.7  17.8
+Hamas attack / Gaza war begins          20.1  30.0  24.2  5.2  20.5  19.5  30.6  22.0  6.7  21.2
+Russia full-scale invasion of Ukraine   21.3  30.2  21.2  8.5  18.9  17.1  39.4  17.4  6.6  19.5
+```
+
+### same r/nosurf authors: change in mean tone (random-date 95% range -0.063 to +0.058)
+
+```
+                                       authors  mean_change  ci_low  ci_high
+event                                                                       
+COVID-19 pandemic declared                 322       -0.037  -0.086    0.025
+Russia full-scale invasion of Ukraine      401       -0.042  -0.094    0.008
+Hamas attack / Gaza war begins             385       -0.058  -0.112   -0.006
+Assassination of Charlie Kirk              613       -0.070  -0.115   -0.024
+```
+
+### r/nosurf sessions: bucket that moved most per event (largest gap 9.2 points after Russia full-scale invasion of Ukraine, placebo p = 0.02; largest gap at the other events 3.3)
+
+```
+                                      bucket  before  after  gap
+event                                                           
+COVID-19 pandemic declared             10-29    34.4   31.1  3.3
+Russia full-scale invasion of Ukraine  10-29    30.2   39.4  9.2
+Hamas attack / Gaza war begins           2-4    24.2   22.0  2.3
+Assassination of Charlie Kirk            5-9    19.1   15.7  3.3
 ```
