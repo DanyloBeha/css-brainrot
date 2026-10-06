@@ -12,15 +12,15 @@ BUILDERS = {
     "event_effects": ("events.effects_table", "events"),
 }
 
-# id, fn (cell in eda.ipynb), question, tables, what it shows
+# id, fn (cell in eda.ipynb), section in eda.ipynb (4.x), tables, what it shows
 FIGURES = [
-    ("C20", "c20", "H4 Q1", ["daily_features"], "Crisis words per 10,000 words, one line per subreddit"),
-    ("C20b", "c20b", "H4 Q2", ["daily_features", "event_effects"], "Event words after vs before, bars per event"),
-    ("C21", "c21", "H4 Q3", ["daily_features", "event_effects"], "Tone change tiles, 4 groups x 4 events"),
-    ("C22", "c22", "H4 Q4", ["daily_features"], "r/nosurf doomscroll mentions per 10,000 words, weekly, smoothed"),
-    ("C23", "c23", "H4 Q5", ["lexicon_terms_by_month", "overview_counts"], "Brainrot words per 10,000 in r/memes + r/teenagers, stream graph"),
-    ("C24", "c24", "H4 Q6", ["processed Parquet (data/processed)"], "r/nosurf session length buckets, before vs after"),
-    ("C26", "c26", "H4 Q7", ["per-comment features (data/processed/derived)"], "r/nosurf per-author tone change, raincloud"),
+    ("C20", "c20", "4.3", ["daily_features"], "Crisis words per 10,000 words, one line per subreddit"),
+    ("C20b", "c20b", "4.4", ["daily_features", "event_effects"], "Event words after vs before, bars per event"),
+    ("C21", "c21", "4.5", ["daily_features", "event_effects"], "Tone change tiles, 4 groups x 4 events"),
+    ("C22", "c22", "4.6", ["daily_features"], "r/nosurf doomscroll mentions per 10,000 words, weekly, smoothed"),
+    ("C23", "c23", "4.7", ["lexicon_terms_by_month", "overview_counts"], "Brainrot words per 10,000 in r/memes + r/teenagers, stream graph"),
+    ("C24", "c24", "4.8", ["processed Parquet (data/processed)"], "r/nosurf session length buckets, before vs after"),
+    ("C26", "c26", "4.9", ["per-comment features (data/processed/derived)"], "r/nosurf per-author tone change, raincloud"),
 ]
 
 

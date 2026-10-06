@@ -12,4 +12,4 @@ Only the H4 charts remain (decision of 2026-10-05). The charts of the other sect
 | C24 | Did posting sessions in r/nosurf get longer? | Grouped bars by session-length bucket, one colour per bucket, light outlined = before, solid = after | done |
 | C26 | Do the same r/nosurf authors write differently? | Raincloud of per-author tone change with colour gradient | done |
 
-Removed on 2026-10-05: C27 (placebo histograms; explained in the Q3 text), C28 (lead-lag with the uncertainty index; null result in one line), C29 (tone change-points; one line in the summary), C37 (brainrot words in event time; covered by C23), the first C23 (rhythm heatmaps; null result in one line).
+Removed on 2026-10-05: C27 (placebo histograms; explained in section 4.5 of the notebook), C28 (lead-lag with the uncertainty index; null result in one line), C29 (tone change-points; one line in the summary), C37 (brainrot words in event time; covered by C23), the first C23 (rhythm heatmaps; null result in one line).
