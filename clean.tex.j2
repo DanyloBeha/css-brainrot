@@ -3,6 +3,10 @@
 ((* block commands *))
 ((( super() )))
 \setcounter{secnumdepth}{0}
+\newcounter{none}
+\usepackage[BraillePatterns]{ucharclasses}
+\newfontfamily\braillefont{Segoe UI Symbol}[Scale=0.9]
+\setTransitionsFor{BraillePatterns}{\begingroup\braillefont}{\endgroup}
 ((* endblock commands *))
 
 ((* block title *))\title{Exploratory Data Analysis}\date{}((* endblock title *))
