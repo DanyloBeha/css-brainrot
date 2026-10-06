@@ -24,14 +24,14 @@ Written by `python -m src.checks` (numeric tables only; row-level text is never 
 
 ```
                         d  comments  threads   top1  top1_share  top3_share
-1047  2020-04-15 00:00:00     238.0     49.0   59.0        0.25        0.52
-3559  2021-02-12 00:00:00     243.0     37.0   41.0        0.17        0.41
-3907  2021-12-30 00:00:00     270.0     38.0   89.0        0.33        0.63
-1718  2024-01-25 00:00:00     351.0     43.0  112.0        0.32        0.55
-3720  2024-03-22 00:00:00     367.0     43.0  122.0        0.33        0.53
-2277  2024-08-16 00:00:00     342.0     49.0   93.0        0.27        0.55
-3579  2024-12-19 00:00:00     382.0     51.0  106.0        0.28        0.46
-1647  2025-09-11 00:00:00     530.0     58.0  160.0        0.30        0.72
+3963  2020-04-15 00:00:00     238.0     49.0   59.0        0.25        0.52
+2535  2021-02-12 00:00:00     243.0     37.0   41.0        0.17        0.41
+2768  2021-12-30 00:00:00     270.0     38.0   89.0        0.33        0.63
+345   2024-01-25 00:00:00     351.0     43.0  112.0        0.32        0.55
+2378  2024-03-22 00:00:00     367.0     43.0  122.0        0.33        0.53
+1932  2024-08-16 00:00:00     342.0     49.0   93.0        0.27        0.55
+2278  2024-12-19 00:00:00     382.0     51.0  106.0        0.28        0.46
+273   2025-09-11 00:00:00     530.0     58.0  160.0        0.30        0.72
 0                 typical     131.0     33.0    NaN        0.21        0.43
 ```
 
@@ -296,6 +296,56 @@ month
 2024-12-01    10.8
 2025-01-01     6.5
 2025-02-01     8.4
+```
+
+### all brainrot words pooled, rate per 10,000 words: 8 weeks before vs 4 / 8 weeks after (placebo: 888 days)
+
+```
+                                                              before  after  change  hits_after  placebo_p  placebo_lo  placebo_hi
+subreddits        event                          weeks_after                                                                      
+memes + teenagers Hamas attack / Gaza war begins 4             0.953  1.532   0.579          34      0.407      -1.382       1.946
+                  Assassination of Charlie Kirk  4             0.956  1.479   0.524          49      0.439      -1.382       1.946
+                  Hamas attack / Gaza war begins 8             0.953  3.396   2.443         166      0.000      -1.410       1.414
+                  Assassination of Charlie Kirk  8             0.956  1.112   0.156          57      0.694      -1.410       1.414
+all six           Hamas attack / Gaza war begins 4             0.184  0.266   0.082          39      0.548      -0.349       0.512
+                  Assassination of Charlie Kirk  4             0.356  0.376   0.020          74      0.860      -0.349       0.512
+                  Hamas attack / Gaza war begins 8             0.184  0.563   0.379         178      0.035      -0.352       0.386
+                  Assassination of Charlie Kirk  8             0.356  0.368   0.012         126      0.925      -0.352       0.386
+```
+
+### memes + teenagers, weekly rate per 10,000 words around each event (week 0 = event week)
+
+```
+     Hamas attack / Gaza war begins  Assassination of Charlie Kirk
+-8                             0.74                           1.56
+-7                             0.94                           0.45
+-6                             1.65                           0.68
+-5                             0.91                           0.33
+-4                             0.43                           1.94
+-3                             1.01                           1.93
+-2                             1.61                           0.28
+-1                             0.65                           0.93
+ 0                             0.47                           0.53
+ 1                             3.12                           0.83
+ 2                             0.51                           0.64
+ 3                             1.58                           2.66
+ 4                             0.53                            NaN
+ 5                             4.45                            NaN
+ 6                            11.00                            NaN
+ 7                             5.36                            NaN
+ 8                             3.01                            NaN
+ 9                             2.08                            NaN
+ 10                            4.17                            NaN
+ 11                            1.91                            NaN
+ 12                            3.34                            NaN
+```
+
+### the highest week after the Gaza war (week 6, from 2023-11-18): sampled comments with brainrot words
+
+```
+      comments_with_brainrot  authors  days
+week                                       
+6                         25       24     3
 ```
 
 ### r/nosurf doomscroll mentions per 10,000 words, by year
