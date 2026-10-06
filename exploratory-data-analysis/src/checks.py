@@ -223,6 +223,42 @@ def brainrot_spike_check(months=("2023-10-01", "2023-11-01", "2024-04-01", "2024
     show(f"crisis words per 10,000 (memes + teenagers), 2023-08 to 2025-02 (median of all months {cr.median():.1f})", cr["2023-08":"2025-02"].round(1))
 
 
+def brainrot_pooled_check():
+    # all brainrot words pooled; placebo = every day from 2022-11 on that is >120 days from an event (windows overlap: read p as a guide)
+    # the 8-week window was picked after seeing the weekly series (the jump comes 5-7 weeks after Gaza), so it is descriptive
+    real = [pd.Timestamp(v) for v in EVENTS.values()]
+    pool = [d for d in pd.date_range("2022-11-01", "2026-08-01") if all(abs((d - r).days) > 120 for r in real)]
+    rows, weekly = [], {}
+    for label, subs in (("memes + teenagers", ["memes", "teenagers"]), ("all six", None)):
+        hits, words = ev.term_daily(subs)
+        h = hits.sum(axis=1)
+        ch, cw = np.r_[0, h.to_numpy().cumsum()], np.r_[0, words.to_numpy().cumsum()]
+
+        def rate(a, b):
+            return (ch[b + 1] - ch[a]) / max(cw[b + 1] - cw[a], 1) * 1e4
+
+        for post in (28, 56):
+            fake = np.array([rate(i, i + post - 1) - rate(i - 56, i - 1) for i in (h.index.get_loc(d) for d in pool)])
+            for name in list(EVENTS)[2:]:
+                i0 = h.index.get_loc(pd.Timestamp(EVENTS[name]))
+                b, a = rate(i0 - 56, i0 - 1), rate(i0, i0 + post - 1)
+                rows.append(dict(subreddits=label, event=name, weeks_after=post // 7, before=b, after=a, change=a - b, hits_after=int(ch[i0 + post] - ch[i0]), placebo_p=float((np.abs(fake) >= abs(a - b)).mean()),
+                                 placebo_lo=np.percentile(fake, 2.5), placebo_hi=np.percentile(fake, 97.5)))
+        if subs:
+            for name, weeks in ((list(EVENTS)[2], 13), (list(EVENTS)[3], 4)):
+                i0 = h.index.get_loc(pd.Timestamp(EVENTS[name]))
+                weekly[name] = {w: rate(i0 + 7 * w, i0 + 7 * w + 6) for w in range(-8, weeks)}
+    show(f"all brainrot words pooled, rate per 10,000 words: 8 weeks before vs 4 / 8 weeks after (placebo: {len(pool)} days)", pd.DataFrame(rows).set_index(["subreddits", "event", "weeks_after"]).round(3))
+    show("memes + teenagers, weekly rate per 10,000 words around each event (week 0 = event week)", pd.DataFrame(weekly).round(2))
+    g = weekly[list(EVENTS)[2]]
+    wk = max((w for w in g if w >= 0), key=g.get)                      # highest week after the Gaza war: how many comments and authors is it made of
+    t0 = pd.Timestamp(EVENTS[list(EVENTS)[2]]) + pd.Timedelta(days=7 * wk)
+    q = duckdb.sql(f"""SELECT count(*) AS comments_with_brainrot, count(DISTINCT author_id) AS authors, count(DISTINCT CAST(ts AS DATE)) AS days
+                       FROM read_parquet('{PROC}/derived/lexicon_matches.parquet') WHERE type = 'comment' AND subreddit IN ('memes', 'teenagers')
+                       AND ts >= timestamp '{t0:%Y-%m-%d}' AND ts < timestamp '{t0 + pd.Timedelta(days=7):%Y-%m-%d}' AND (len(core_terms) > 0 OR len(ext_terms) > 0)""").df()
+    show(f"the highest week after the Gaza war (week {wk}, from {t0:%Y-%m-%d}): sampled comments with brainrot words", q.set_index(pd.Index([wk], name="week")))
+
+
 def doomscroll_trend_check():
     d = ev.load_daily()
     d = d[d.subreddit == "nosurf"].set_index("day")[["hits_doom", "tokens"]]
@@ -285,7 +321,7 @@ def session_shift_check():
 
 def main(which=None):
     steps = which or ["raw_profile", "spike_context", "phase4_numbers",
-                      "brainrot_event_check", "brainrot_event_check_shortform", "volume_event_check", "brainrot_spike_check", "doomscroll_trend_check",
+                      "brainrot_event_check", "brainrot_event_check_shortform", "volume_event_check", "brainrot_spike_check", "brainrot_pooled_check", "doomscroll_trend_check",
                       "rhythm_check", "session_bucket_check", "authors_check", "session_shift_check"]
     for s in steps:
         globals()[s]()
