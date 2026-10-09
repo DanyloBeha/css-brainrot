@@ -57,8 +57,17 @@ def db():
         CREATE TABLE IF NOT EXISTS comments (video_id TEXT, rank INTEGER, text TEXT, likes_text TEXT, PRIMARY KEY (video_id, rank));
         CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, started_at TEXT, ended_at TEXT, workers INTEGER, batch_size INTEGER, target INTEGER,
                                          comments INTEGER, ended_by TEXT);
+        CREATE TABLE IF NOT EXISTS comments2 (video_id TEXT, sort TEXT, rank INTEGER, text TEXT, likes_text TEXT, age_text TEXT, replies_text TEXT,
+                                              pinned INTEGER, hearted INTEGER, edited INTEGER, fetched_at TEXT, PRIMARY KEY (video_id, sort, rank));
+        CREATE TABLE IF NOT EXISTS comment_jobs (video_id TEXT PRIMARY KEY, year INTEGER, status TEXT, n_top INTEGER, n_newest INTEGER, fetched_at TEXT);
+        CREATE TABLE IF NOT EXISTS edges (src TEXT, dst TEXT, pos INTEGER, PRIMARY KEY (src, dst));
+        CREATE TABLE IF NOT EXISTS related_seeds (src TEXT PRIMARY KEY, year INTEGER, matched TEXT, status TEXT, fetched_at TEXT);
+        CREATE TABLE IF NOT EXISTS related (src TEXT, pos INTEGER, dst TEXT, title TEXT, channel TEXT, views_text TEXT, age_text TEXT, PRIMARY KEY (src, pos));
         CREATE TABLE IF NOT EXISTS log (run_id TEXT, ts TEXT, kind TEXT, key TEXT, status TEXT, error TEXT, seconds REAL, results INTEGER, note TEXT);
     """)
+    if not con.execute("SELECT 1 FROM comments2 LIMIT 1").fetchone():          # first top-10 comments (no age, replies ...) move to the new table once
+        con.execute("INSERT OR IGNORE INTO comments2 (video_id, sort, rank, text, likes_text) SELECT video_id, 'top', rank, text, likes_text FROM comments")
+        con.commit()
     return con
 
 
@@ -121,6 +130,16 @@ def _text(x):
     return x.get("simpleText") or "".join(r.get("text", "") for r in x.get("runs", [])) or None
 
 
+def _lockup_video(r):
+    """Video dict from a `lockupViewModel` (the layout used for result and recommendation cards), None for playlists, channels and mixes."""
+    if r.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+        return None
+    meta = r.get("metadata", {}).get("lockupMetadataViewModel", {})
+    rows = [p.get("text", {}).get("content") for m in meta.get("metadata", {}).get("contentMetadataViewModel", {}).get("metadataRows", []) for p in m.get("metadataParts", [])]
+    return dict(video_id=r.get("contentId"), source="lockup", title=meta.get("title", {}).get("content"), channel=rows[0] if rows else None, channel_id=None,
+                views_text=next((x for x in rows if x and "view" in x), None), age_text=next((x for x in rows if x and "ago" in x), None), length_text=None)
+
+
 def parse_results(data):
     """Videos in one search response (first page data or a scroll continuation): list of dicts. Handles `videoRenderer` and the newer
     `lockupViewModel`; Shorts shelves (`reelItemRenderer`, `shortsLockupViewModel`) give an id and a title only (source = 'shorts')."""
@@ -130,14 +149,7 @@ def parse_results(data):
         out.append(dict(video_id=r.get("videoId"), source="video", title=_text(r.get("title")), channel=ch.get("text"),
                         channel_id=ch.get("navigationEndpoint", {}).get("browseEndpoint", {}).get("browseId"),
                         views_text=_text(r.get("viewCountText")), age_text=_text(r.get("publishedTimeText")), length_text=_text(r.get("lengthText"))))
-    for r in _walk(data, "lockupViewModel"):
-        if r.get("contentType") == "LOCKUP_CONTENT_TYPE_VIDEO":
-            meta = r.get("metadata", {}).get("lockupMetadataViewModel", {})
-            rows = [p.get("text", {}).get("content") for m in meta.get("metadata", {}).get("contentMetadataViewModel", {}).get("metadataRows", [])
-                    for p in m.get("metadataParts", [])]
-            out.append(dict(video_id=r.get("contentId"), source="lockup", title=meta.get("title", {}).get("content"), channel=rows[0] if rows else None,
-                            channel_id=None, views_text=next((x for x in rows if x and "view" in x), None),
-                            age_text=next((x for x in rows if x and "ago" in x), None), length_text=None))
+    out += [h for h in map(_lockup_video, _walk(data, "lockupViewModel")) if h]
     for r in _walk(data, "reelItemRenderer"):
         out.append(dict(video_id=r.get("videoId"), source="shorts", title=_text(r.get("headline")), channel=None, channel_id=None,
                         views_text=_text(r.get("viewCountText")), age_text=None, length_text=None))
@@ -224,6 +236,65 @@ def run_search(terms=None, sorts=("views", "date"), max_results=500, headless=Tr
             print(f"search {term!r} by {sort}: {n} videos, reached end of results: {end}")
 
 
+# ------------------------------------------------------------------ comments
+COMMENT_JS = """(skip) => [...document.querySelectorAll('ytd-comment-thread-renderer')].slice(skip).map(t => {
+    const q = s => t.querySelector(s), time = q('#published-time-text');
+    return {text: q('#content-text')?.innerText ?? '', likes: q('#vote-count-middle')?.innerText?.trim() ?? '', age: time?.innerText?.trim() ?? '',
+            replies: q('ytd-comment-replies-renderer #more-replies')?.innerText?.trim() ?? '', pinned: !!q('ytd-pinned-comment-badge-renderer'),
+            hearted: !!q('#creator-heart'), edited: (time?.parentElement?.innerText ?? '').includes('edited')}})"""
+
+
+def read_comments(br, n, sort="top", pause=1.2, idle_scrolls=4):
+    """Scroll the comment section of the open watch page until `n` top-level comments are loaded (about 20 per scroll) or `idle_scrolls`
+    scrolls bring nothing new; returns dicts (text, likes, age, replies, pinned, hearted, edited) in page order. Authors are never read.
+    sort = "top" (YouTube's default, liked comments first) or "newest" (menu entry "Newest"). Only the age as YouTube writes it ("3 years
+    ago", rounded down) is available, not a date."""
+    if sort == "newest":
+        second = "() => document.querySelectorAll('ytd-comment-thread-renderer #content-text')[1]?.innerText ?? ''"      # the first can be a pinned comment in both sorts
+        before = br.page.evaluate(second)
+        menu = br.page.locator("ytd-comments-header-renderer #sort-menu").first
+        menu.scroll_into_view_if_needed(timeout=8000)
+        menu.click(timeout=8000)
+        br.page.locator("ytd-comments-header-renderer tp-yt-paper-listbox a, ytd-menu-popup-renderer a").filter(has_text="Newest").first.click(timeout=8000)
+        try:                                       # wait until the list shows other comments than before
+            br.page.wait_for_function("(old) => (document.querySelectorAll('ytd-comment-thread-renderer #content-text')[1]?.innerText ?? '') !== old", arg=before, timeout=8000)
+        except Exception:
+            pass
+        time.sleep(1.5)
+    try:
+        br.page.wait_for_selector("ytd-comment-thread-renderer", timeout=12000)
+    except Exception:
+        return []
+    have, idle = br.page.locator("ytd-comment-thread-renderer").count(), 0
+    while have < n and idle < idle_scrolls:
+        br.page.mouse.wheel(0, 4000)
+        time.sleep(pause)
+        now_count = br.page.locator("ytd-comment-thread-renderer").count()
+        idle = 0 if now_count > have else idle + 1
+        have = now_count
+        br._check_block()
+    return br.page.evaluate(COMMENT_JS, 0)[:n]
+
+
+def fetch_comments(br, video_id, n=200, sorts=("top",)):
+    """Open the watch page and read `n` comments in each of `sorts`; returns (status, count text, {sort: comments}). Used by yt_comments."""
+    br.goto(f"https://www.youtube.com/watch?v={video_id}&hl=en")
+    try:
+        br.page.wait_for_function("() => window.ytInitialPlayerResponse", timeout=15000)
+    except Exception:
+        return "no_player", None, {}
+    status = (br.page.evaluate("() => window.ytInitialPlayerResponse").get("playabilityStatus") or {}).get("status", "unknown")
+    if status != "OK":
+        return status, None, {}
+    br.page.mouse.wheel(0, 900)
+    try:
+        br.page.wait_for_function("() => /\\d/.test(document.querySelector('ytd-comments-header-renderer #count')?.innerText || '')", timeout=12000)
+    except Exception:
+        return ("comments_off" if "turned off" in (br.page.locator("#comments").first.inner_text() if br.page.locator("#comments").count() else "") else "no_comments"), None, {}
+    count = " ".join(br.page.locator("ytd-comments-header-renderer #count").first.inner_text().split())
+    return "OK", count, {sort: read_comments(br, n, sort) for sort in sorts}
+
+
 # ------------------------------------------------------------------ watch page
 def slim(player, page, comment_count_text):
     """The parts of a watch page that the dataset uses (the full page is about 1 MB; the stream URLs, ads and storyboards are dropped).
@@ -264,18 +335,25 @@ def fetch_watch(br, video_id, n_comments=0):
                     count = "Comments are turned off"
                     break
         if n_comments and count and count[:1].isdigit():
-            for _ in range(n_comments // 10 + 1):
-                br.page.mouse.wheel(0, 2500)
-                time.sleep(1.2)
-            for k, el in enumerate(br.page.locator("ytd-comment-thread-renderer").all()[:n_comments]):
-                comments.append((k, el.locator("#content-text").first.inner_text(), el.locator("#vote-count-middle").first.inner_text().strip()))
+            comments = read_comments(br, n_comments)
     return (player.get("playabilityStatus") or {}).get("status", "unknown"), slim(player, page, count), comments
 
 
-def store_video(con, vid, status, raw, comments=()):
-    """Store one fetched watch page (slim JSON compressed) and its top comments."""
-    con.execute("INSERT OR REPLACE INTO videos VALUES (?,?,?,?,?)", (vid, now(), PARSER_VERSION, status, zlib.compress(json.dumps(raw).encode())))
-    con.executemany("INSERT OR REPLACE INTO comments VALUES (?,?,?,?)", [(vid, k, t, v) for k, t, v in comments])
+def store_video(con, vid, status, raw, comments=(), sort="top"):
+    """Store one fetched watch page (slim JSON compressed) and its comments (dicts from `read_comments`)."""
+    stamp = now()
+    con.execute("INSERT OR REPLACE INTO videos VALUES (?,?,?,?,?)", (vid, stamp, PARSER_VERSION, status, zlib.compress(json.dumps(raw).encode())))
+    if comments:                                    # a page fetched without comments must not wipe comments stored earlier
+        store_comments(con, vid, sort, comments, stamp)
+    con.commit()
+
+
+def store_comments(con, vid, sort, comments, stamp=None):
+    """Comments of one video and sort into `comments2` (replaces what was stored for that video and sort)."""
+    stamp = stamp or now()
+    con.execute("DELETE FROM comments2 WHERE video_id = ? AND sort = ?", (vid, sort))
+    con.executemany("INSERT INTO comments2 VALUES (?,?,?,?,?,?,?,?,?,?,?)", [(vid, sort, k, c["text"], c["likes"], c["age"], c["replies"], int(c["pinned"]), int(c["hearted"]), int(c["edited"]), stamp)
+                                                                            for k, c in enumerate(comments)])
     con.commit()
 
 
@@ -306,9 +384,23 @@ def run_detail(limit=300, n_comments=0, headless=True):
                 print(f"  {i}/{len(todo)}, {(time.time() - t0) / i:.1f} s per video")
 
 
+def fetch_related(br, video_id, k=10):
+    """Open the watch page and return (status, first k recommended videos in sidebar order). A fresh logged-out browser sees the
+    recommendations of the video itself, not of a person. Playlists, mixes and Shorts shelves are skipped: only video cards count."""
+    br.goto(f"https://www.youtube.com/watch?v={video_id}&hl=en")
+    try:
+        br.page.wait_for_function("() => window.ytInitialPlayerResponse && window.ytInitialData", timeout=15000)
+    except Exception:
+        return "no_player", []
+    status = (br.page.evaluate("() => window.ytInitialPlayerResponse").get("playabilityStatus") or {}).get("status", "unknown")
+    page = br.page.evaluate("() => window.ytInitialData")
+    recs = [h for h in map(_lockup_video, _walk(page, "lockupViewModel")) if h and h["video_id"] != video_id]
+    return status, recs[:k]
+
+
 # ------------------------------------------------------------------ several browsers at once
 def worker(index, workers, tasks, results, stop, headless):
-    """Process body: one Chromium, takes tasks ("search", term, sort, max_results) or ("detail", video_id, n_comments) from `tasks`, puts
+    """Process body: one Chromium, takes tasks ("search", term, sort, max_results), ("detail", video_id, n_comments), ("related", video_id, k) or ("comments", video_id, n, sorts) from `tasks`, puts
     (task, output, error, seconds) on `results`. Never touches SQLite. A CAPTCHA sets `stop` for everybody. Start times are staggered so
     the workers' page loads are spread evenly over the DELAY."""
     import queue
@@ -321,7 +413,7 @@ def worker(index, workers, tasks, results, stop, headless):
                 continue
             t0 = time.time()
             try:
-                out = search(br, *task[1:]) if task[0] == "search" else fetch_watch(br, *task[1:])
+                out = {"search": search, "detail": fetch_watch, "related": fetch_related, "comments": fetch_comments}[task[0]](br, *task[1:])
                 results.put((task, out, None, time.time() - t0))
             except Blocked as e:
                 stop.set()

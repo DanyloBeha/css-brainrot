@@ -4,6 +4,7 @@
     python -m src.yt_run --target 20000 --batch-size 250 --comments 0   # same, other settings
     python -m src.yt_run --workers 5                                    # more browsers at once (max 6)
     python -m src.yt_run --search-only                                  # only find videos (all queries), fetch nothing
+    python -m src.yt_run --discover related --target 20000              # keep going from recommendations, no more searches
 
 Settings (change the constants here or pass the flags):
     BATCH_SIZE   videos fetched per round. After each round the script checks how many found-but-unfetched videos are left and, if there are
@@ -12,12 +13,15 @@ Settings (change the constants here or pass the flags):
     WORKERS      browsers running at the same time (separate processes, about 0.5 GB of memory each). Each keeps its own pause of
                  3 s between its page loads, so the speed is roughly WORKERS times one browser, and so is the load on YouTube: a CAPTCHA
                  stops all of them at once.
-    COMMENTS     top comments (text only, no authors) saved per video; 0 = none (faster).
+    COMMENTS     top comments (text only, no authors) saved per video while the page is fetched; 0 = none (faster). For many comments of chosen
+                 videos use `python -m src.yt_comments` (deep, with age text; for the crisis questions).
 
 How new videos are found: by SEARCH. Every query in `yt_browser.all_terms` (the lexicon terms, then "<core term> <year>" for 2020-2026) is
 run twice, sorted by view count and by upload date, and scrolled to the end (about 450-500 videos per run). Add queries in `QUERIES` in
-yt_browser.py. With --snowball, the "related videos" shown next to brainrot-titled videos are added as candidates when the queries run out
-(they are checked by title after fetching, so some are not brainrot: they form a context sample and are not the search sample).
+yt_browser.py. --discover related (or both) adds a second way: the first --rec-k (3) recommended videos next to every brainrot-titled video
+become candidates (no extra page loads: the order is stored with each page); with `both` this starts when the searches run out. Candidates
+are fetched like the others and kept in `edges`; their own titles decide whether they expand the next round. They are the recommender's
+neighbourhood (recent, popular), found_by = '(related)', so analyse them apart from the search sample.
 
 Progress: a bar with speed and time left, and the file data/external/raw/yt_scrape/videos_live.csv gets one new line per video right
 away (open it any time; git-ignored, it contains titles). Everything is also in yt.sqlite; Ctrl-C is safe and a new run continues.
@@ -40,7 +44,7 @@ from .yt_dataset import _row, build, clean
 
 BATCH_SIZE = 500
 TARGET = 10_000
-COMMENTS = 10
+COMMENTS = 20
 WORKERS = 3
 MAX_RESULTS = 500                      # one search shows at most about 500 videos
 SORTS = ("views", "date")
@@ -80,15 +84,21 @@ def n_fetched(con):
     return con.execute("SELECT count(*) FROM videos WHERE parser_version = ?", (PARSER_VERSION,)).fetchone()[0]
 
 
-def add_related(con):
-    """Related videos of brainrot-titled videos that are not candidates yet become candidates (term '(related)', last in line)."""
+def add_related(con, k=3):
+    """Recommendation discovery: the first `k` recommended videos (sidebar order, stored when the page was fetched) of every brainrot-titled
+    video fetched so far become candidates (term '(related)', after all search results). Every link is kept in `edges`. The candidates are
+    fetched like any other video and their title decides whether they are brainrot-titled and expand the next round; recommendations favour
+    recent and popular videos, so this sample is not time-balanced. Returns the number of new candidates."""
     seen = {r[0] for r in con.execute("SELECT video_id FROM hits")}
-    new = set()
-    for (raw,) in con.execute("SELECT raw FROM videos WHERE parser_version = ? AND status = 'OK'", (PARSER_VERSION,)):
+    new, edges = {}, []
+    for vid, raw in con.execute("SELECT video_id, raw FROM videos WHERE parser_version = ? AND status = 'OK'", (PARSER_VERSION,)):
         r = json.loads(zlib.decompress(raw))
         if re.search(BRAINROT_RE, clean(r.get("details", {}).get("title"))):
-            new.update(x for x in r.get("related", []) if x and x not in seen)
-    con.executemany("INSERT OR IGNORE INTO hits VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [(v, "(related)", "related", 1000, now(), "related", None, None, None, None, None, None) for v in new])
+            recs = [x for x in r.get("related", []) if x and x != vid][:k]
+            edges += [(vid, x, pos) for pos, x in enumerate(recs, 1)]
+            new.update({x: pos for pos, x in enumerate(recs, 1) if x not in seen and x not in new})
+    con.executemany("INSERT OR IGNORE INTO edges VALUES (?,?,?)", edges)
+    con.executemany("INSERT OR IGNORE INTO hits VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [(v, "(related)", "related", 1000 + pos, now(), "related", None, None, None, None, None, None) for v, pos in new.items()])
     con.commit()
     return len(new)
 
@@ -152,6 +162,14 @@ def report_md(con, run_id=None):
     miss.loc["tags (none given)"] = [int((ok.tags.map(len) == 0).sum()), round(100 * (ok.tags.map(len) == 0).mean(), 1)]
     miss.loc["comments_off (true)"] = [int(ok.comments_off.fillna(False).sum()), round(100 * ok.comments_off.fillna(False).mean(), 1)]
     out += [f"## Fields of the {len(ok)} ok pages\n", "Missing = null in the dataset (hidden likes, comments off, comment count not read in time), never filled with 0.\n", _block(miss)]
+    # how the videos were found: search or recommendations
+    rel = vids.found_by.map(lambda x: isinstance(x, list) and x == ["(related)"])
+    if rel.any():
+        how = pd.DataFrame({"fetched": [int((~rel).sum()), int(rel.sum())], "ok_%": [round(100 * (vids[~rel].status == "OK").mean(), 1), round(100 * (vids[rel].status == "OK").mean(), 1)],
+                            "brainrot_titled_%": [round(100 * vids[~rel & (vids.status == "OK")].br.mean(), 1), round(100 * vids[rel & (vids.status == "OK")].br.mean(), 1)]},
+                           index=["found by search", "found only by recommendation"])
+        out += ["## Recommendation discovery\n", f"{con.execute('SELECT count(*) FROM edges').fetchone()[0]} links (brainrot-titled video -> recommended video) stored in `edges`. "
+                "Share of fetched videos whose title matches the lexicon, by how they were found (recommended videos are the recommender's neighbourhood, recent and popular):\n", _block(how)]
     # search
     s = pd.read_sql("SELECT term, sort, fetched_at, results, reached_end, seconds FROM searches", con)
     h = pd.read_sql("SELECT video_id, term, sort, fetched_at, title FROM hits WHERE term != '(related)'", con)
@@ -184,16 +202,16 @@ def write_report(con, run_id=None):
     return text
 
 
-def run(target=TARGET, batch_size=BATCH_SIZE, comments=COMMENTS, years=True, snowball=False, headed=False, workers=WORKERS, search_only=False, max_queries=None):
+def run(target=TARGET, batch_size=BATCH_SIZE, comments=COMMENTS, years=True, headed=False, workers=WORKERS, search_only=False, max_queries=None, discover="search", rec_k=3):
     con = db()
     backfill(con)
     run_id = now()
     con.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?)", (run_id, run_id, None, workers, batch_size, target, comments, None))
     con.commit()
     done, t_start, ok, errors, brainrot, bad_in_row, ended_by = n_fetched(con), time.time(), 0, 0, 0, 0, "target reached"
-    queries = pending_queries(con, all_terms(years), SORTS, MAX_RESULTS)[:max_queries]
+    queries = [] if discover == "related" else pending_queries(con, all_terms(years), SORTS, MAX_RESULTS)[:max_queries]
     found = con.execute("SELECT count(DISTINCT video_id) FROM hits").fetchone()[0]
-    print(f"{done} videos fetched so far, target {target}, batch {batch_size}, {workers} browsers; {found} found by search, {len(queries)} searches left; live file: {LIVE}")
+    print(f"{done} videos fetched so far, target {target}, batch {batch_size}, {workers} browsers; {found} found so far, {len(queries)} searches left, discovery: {discover}; live file: {LIVE}")
     pool = Pool(workers, not headed)
     bar = tqdm(total=target, initial=done, unit="video", dynamic_ncols=True)
     try:
@@ -222,12 +240,12 @@ def run(target=TARGET, batch_size=BATCH_SIZE, comments=COMMENTS, years=True, sno
                 ended_by = "searches done (search only)"
                 bar.write(f"Searches done: {len(todo)} videos waiting to be fetched.")
                 break
-            if len(todo) < batch_size and snowball and not queries:
-                bar.write(f"  queries done: {add_related(con)} related videos added")
+            if len(todo) < batch_size and discover != "search" and not queries:             # no searches left: look at recommendations
+                bar.write(f"  recommendations of brainrot-titled videos (first {rec_k}): {add_related(con, rec_k)} new candidates")
                 todo = unfetched(con)
             if not todo:
                 ended_by = "no videos left to fetch"
-                bar.write("No videos left to fetch: add queries (QUERIES in src/yt_browser.py) or run with --snowball.")
+                bar.write("No videos left to fetch: add queries (QUERIES in src/yt_browser.py) or use --discover both / related.")
                 break
             n = min(batch_size, target - done, len(todo))
             bar.write(f"  batch of {n} videos ({len(todo)} waiting)")
@@ -284,14 +302,16 @@ def main():
     ap.add_argument("--max-queries", type=int, help="run at most this many searches in this run (default: as many as needed)")
     ap.add_argument("--report", action="store_true", help="only rewrite docs/youtube_run_report.md from the database")
     ap.add_argument("--years", action=argparse.BooleanOptionalAction, default=True, help="also search '<core term> <year>' (2020-2026)")
-    ap.add_argument("--snowball", action="store_true", help="when the queries run out, add related videos of brainrot-titled videos")
+    ap.add_argument("--discover", choices=["search", "related", "both"], default="search",
+                    help="how new videos are found: search queries (default), recommendations of brainrot-titled videos, or both (searches first, recommendations when they run out)")
+    ap.add_argument("--rec-k", type=int, default=3, help="recommendations per brainrot-titled video that become candidates (sidebar order)")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     a = ap.parse_args()
     if a.report:
         write_report(db())
         print(f"wrote {REPORT}")
         return
-    run(a.target, a.batch_size, a.comments, a.years, a.snowball, a.headed, min(a.workers, 6), a.search_only, a.max_queries)
+    run(a.target, a.batch_size, a.comments, a.years, a.headed, min(a.workers, 6), a.search_only, a.max_queries, a.discover, a.rec_k)
 
 
 if __name__ == "__main__":

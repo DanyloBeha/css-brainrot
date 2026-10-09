@@ -2,7 +2,8 @@
 
 Run `python -m src.yt_dataset` to rebuild:
     data/external/raw/yt_scrape/videos.parquet    one row per video, with title, description, tags (row-level text: LOCAL, git-ignored)
-    data/external/raw/yt_scrape/comments.parquet  top comments, text only, no authors (LOCAL, git-ignored)
+    data/external/raw/yt_scrape/comments.parquet  comments, text only, no authors, with the age as YouTube writes it and the posting
+                                                  period that age allows (LOCAL, git-ignored)
     data/external/youtube_scrape_monthly.parquet  per publish month, numbers only (tracked)
     docs/numbers_youtube_scrape.md                numeric tables behind everything quoted from this dataset
 
@@ -44,8 +45,38 @@ def clean(text):
 
 def number(text):
     """'17,253 Comments' -> 17253, '1.97 million subscribers' -> 1970000, '12K' -> 12000; None when there is no number."""
-    m = re.search(r"([\d,]*\.?\d+)\s*(thousand|million|billion|[kmb])?\b", text or "", flags=re.I)
+    m = re.search(r"([\d,]*\.?\d+)\s*(thousand|million|billion|[kmb])?\b", text if isinstance(text, str) else "", flags=re.I)
     return round(float(m.group(1).replace(",", "")) * UNIT[(m.group(2) or "").lower()]) if m else None
+
+
+AGE_DAYS = {"second": 1 / 86400, "minute": 1 / 1440, "hour": 1 / 24, "day": 1, "week": 7, "month": 30.44, "year": 365.25}
+
+
+def age_range(age_text, fetched):
+    """Posting period allowed by an age as YouTube writes it: "3 years ago" (rounded down) means 3 to 4 years before `fetched`, "5 months ago"
+    5 to 6 months, "just now" the last minute. Returns (earliest, latest) timestamps or (NaT, NaT). A comment is never dated more exactly
+    than this: older comments are only known to the year, so crisis windows shorter than a year cannot be told apart for them."""
+    m = re.match(r"\s*(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", age_text or "")
+    if not m:
+        return (pd.Timestamp("NaT"), pd.Timestamp("NaT")) if "just now" not in (age_text or "") else (fetched - pd.Timedelta(minutes=1), fetched)
+    n, d = int(m.group(1)), AGE_DAYS[m.group(2)]
+    return fetched - pd.Timedelta(days=(n + 1) * d), fetched - pd.Timedelta(days=n * d)
+
+
+def load_comments(con):
+    """All stored comments (sort top / newest) with numbers parsed and `posted_from` / `posted_to` / `posted_year` from the age text.
+    `posted_year` is the year of the middle of the allowed period; `year_certain` says the whole period lies in that year."""
+    c = pd.read_sql("SELECT * FROM comments2", con)
+    c["fetched_at"] = pd.to_datetime(c["fetched_at"], utc=True)
+    c["age_text"], c["replies_text"] = c.age_text.fillna(""), c.replies_text.fillna("")
+    c["likes"], c["replies"] = c.likes_text.map(number), c.replies_text.map(number)
+    c["likes"] = c.likes.fillna(0).where(c.age_text != "", None)            # the page shows no number for 0 likes; rows from before the age text was read stay unknown
+    rng = [age_range(a, f) for a, f in zip(c.age_text, c.fetched_at)]
+    c["posted_from"], c["posted_to"] = [r[0] for r in rng], [r[1] for r in rng]
+    mid = c.posted_from + (c.posted_to - c.posted_from) / 2
+    c["posted_year"] = mid.dt.year.astype("Int64")
+    c["year_certain"] = c.posted_from.dt.year == c.posted_to.dt.year
+    return c
 
 
 def _row(vid, status, raw, fetched):
@@ -78,6 +109,7 @@ def build(con=None):
     v["comments_per_view"] = v["comment_count"] / v["view_count"].where(v["view_count"] > 0)
     t, d = v["title"].map(clean), v["description"].map(clean)
     v["br"] = t.str.contains(plain(BRAINROT_RE), regex=True)
+    v["matched"] = t.str.extract("(" + plain(BRAINROT_RE) + ")", expand=False).str.replace(r"[ -]", "", regex=True)       # the word that made it brainrot-titled
     v["br_core"], v["br_ext"] = t.str.contains(plain(BRAINROT_CORE_RE), regex=True), t.str.contains(plain(BRAINROT_EXT_RE), regex=True)
     v["sigma"], v["game"] = t.str.contains(plain(SIGMA_RE), regex=True), t.str.contains(GAME_RE, regex=True)
     v["br_desc"] = d.str.contains(plain(BRAINROT_RE), regex=True)
@@ -127,15 +159,19 @@ def numbers(v, con):
     both = both[both.list_views > 0]
     rel = ((both.view_count - both.list_views).abs() / both.list_views)
     show("list-page views vs watch-page views (relative difference; the pages were fetched minutes to days apart)", rel.describe().round(4).to_frame("relative_difference"))
-    n = pd.read_sql("SELECT count(*) AS comments, count(DISTINCT video_id) AS videos_with_comments FROM comments", con)
-    show("top comments stored (text only, no authors)", n)
+    c = load_comments(con)
+    if len(c):
+        show("comments stored (text only, no authors) by sort", c.groupby("sort").agg(comments=("rank", "size"), videos=("video_id", "nunique"), with_age=("age_text", lambda x: (x != "").mean()),
+                                                                                  median_likes=("likes", "median"), pinned=("pinned", "sum"), hearted=("hearted", "sum")).round(3))
+        by = c.dropna(subset=["posted_year"]).groupby(["sort", "posted_year"]).agg(comments=("rank", "size"), year_certain_share=("year_certain", "mean")).round(2)
+        show("comments by estimated posting year (age rounded down by YouTube: the year is the middle of the allowed period)", by)
 
 
 def main():
     con = sqlite3.connect(DB)
     v = build(con)
     v.to_parquet(OUT, index=False)
-    pd.read_sql("SELECT * FROM comments", con).to_parquet(OUT_COMMENTS, index=False)
+    load_comments(con).to_parquet(OUT_COMMENTS, index=False)
     monthly(v[v.status == "OK"]).to_parquet(OUT_MONTHLY, index=False)
     print(f"wrote {OUT} ({len(v):,} videos), {OUT_COMMENTS}, {OUT_MONTHLY}")
     numbers(v, con)
